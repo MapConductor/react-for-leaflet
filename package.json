@@ -1,0 +1,49 @@
+{
+  "name": "@mapconductor/react-for-leaflet",
+  "version": "0.1.1",
+  "description": "Leaflet provider for MapConductor React SDK",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./style.css": "./dist/style.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const css=require.resolve('leaflet/dist/leaflet.css');fs.copyFileSync(css,'./dist/style.css');fs.cpSync(path.join(path.dirname(css),'images'),'./dist/images',{recursive:true})\"",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "clean": "rm -rf dist",
+    "test": "echo 'No tests yet'"
+  },
+  "keywords": [
+    "maps",
+    "leaflet",
+    "react",
+    "typescript"
+  ],
+  "author": "MapConductor",
+  "license": "Apache2",
+  "peerDependencies": {
+    "@mapconductor/js-sdk-core": "^0.1.0",
+    "react": "^19.2.0"
+  },
+  "dependencies": {
+    "@mapconductor/js-sdk-core": "0.1.0",
+    "@mapconductor/js-sdk-react": "0.1.0",
+    "leaflet": "^1.9.4"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.21",
+    "react": "^19.2.7",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
