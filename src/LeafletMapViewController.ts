@@ -3,6 +3,7 @@ import {
   createGeoPoint,
   createGeoRectBounds,
   createMapCameraPosition,
+  computeOffset,
   type CameraOptions,
   type CircleCapable,
   type CircleState,
@@ -52,6 +53,11 @@ export class LeafletMapViewController
     RasterLayerCapable {
   private readonly map: LeafletMap;
   private destroyed = false;
+  private logicalTilt: number;
+  private logicalPosition = createGeoPoint({ latitude: 0, longitude: 0 });
+  private logicalZoom = 0;
+  private logicalBearing = 0;
+  private hasLogicalCameraOverride = false;
 
   constructor(
     readonly holder: LeafletMapViewHolder,
@@ -61,9 +67,26 @@ export class LeafletMapViewController
     private readonly polygonController: LeafletPolygonController,
     private readonly groundImageController: LeafletGroundImageController,
     private readonly rasterLayerController: LeafletRasterLayerController,
+    initialTilt = 0,
+    initialBearing = 0,
   ) {
     super();
     this.map = holder.map;
+    this.logicalTilt = initialTilt;
+    const initialCenter = this.map.getCenter();
+    this.logicalPosition = createGeoPoint({ latitude: initialCenter.lat, longitude: initialCenter.lng });
+    this.logicalZoom = this.map.getZoom();
+    this.logicalBearing = initialBearing;
+    this.hasLogicalCameraOverride = initialTilt !== 0 || initialBearing !== 0;
+    if (this.hasLogicalCameraOverride) {
+      const camera = toLeafletCamera(createMapCameraPosition({
+        position: this.logicalPosition,
+        zoom: this.logicalZoom,
+        bearing: this.logicalBearing,
+        tilt: initialTilt,
+      }));
+      this.map.setView([camera.position.latitude, camera.position.longitude], camera.zoom, { animate: false });
+    }
     holder.setController(this);
     markerController.onRasterLayerUpdate = async state => {
       if (state) await rasterLayerController.updateInternal(state);
@@ -112,19 +135,31 @@ export class LeafletMapViewController
   }
 
   async moveCamera(position: MapCameraPosition): Promise<boolean> {
+    this.logicalTilt = position.tilt;
+    this.logicalPosition = position.position;
+    this.logicalZoom = position.zoom;
+    this.logicalBearing = position.bearing;
+    this.hasLogicalCameraOverride = position.tilt !== 0 || position.bearing !== 0;
+    const camera = toLeafletCamera(position);
     this.map.setView(
-      [position.position.latitude, position.position.longitude],
-      position.zoom,
+      [camera.position.latitude, camera.position.longitude],
+      camera.zoom,
       { animate: false },
     );
     return true;
   }
 
   async animateCamera(position: MapCameraPosition, options?: CameraOptions): Promise<boolean> {
+    this.logicalTilt = position.tilt;
+    this.logicalPosition = position.position;
+    this.logicalZoom = position.zoom;
+    this.logicalBearing = position.bearing;
+    this.hasLogicalCameraOverride = position.tilt !== 0 || position.bearing !== 0;
+    const camera = toLeafletCamera(position);
     const durationSeconds = (options?.duration ?? 500) / 1000;
     this.map.flyTo(
-      [position.position.latitude, position.position.longitude],
-      position.zoom,
+      [camera.position.latitude, camera.position.longitude],
+      camera.zoom,
       { duration: durationSeconds },
     );
     return true;
@@ -148,10 +183,10 @@ export class LeafletMapViewController
   getCameraPosition(): MapCameraPosition {
     const center = this.map.getCenter();
     return createMapCameraPosition({
-      position: createGeoPoint({ latitude: center.lat, longitude: center.lng }),
-      zoom: this.map.getZoom(),
-      bearing: 0,
-      tilt: 0,
+      position: this.hasLogicalCameraOverride ? this.logicalPosition : createGeoPoint({ latitude: center.lat, longitude: center.lng }),
+      zoom: this.hasLogicalCameraOverride ? this.logicalZoom : this.map.getZoom(),
+      bearing: this.hasLogicalCameraOverride ? this.logicalBearing : 0,
+      tilt: this.logicalTilt,
       visibleRegion: this.getVisibleRegion(),
     });
   }
@@ -238,6 +273,41 @@ export class LeafletMapViewController
     this.map.remove();
     void this.clearOverlays().finally(() => this.markerController.destroy());
   }
+}
+
+const NEGATIVE_TILT_TARGET_DISTANCE_SCALE = 1.83;
+const NEGATIVE_TILT_ZOOM_OFFSET_AT_MAX_TILT = -0.9;
+const ZOOM0_ALTITUDE = 171_319_879;
+
+/**
+ * Leaflet cannot pitch the camera upward. For negative tilt, move the ground
+ * target forward and render the equivalent positive CSS tilt instead.
+ */
+function toLeafletCamera(position: MapCameraPosition): MapCameraPosition {
+  if (position.tilt >= 0) return position;
+
+  const tiltAbs = Math.min(Math.max(Math.abs(position.tilt), 0), 60);
+  const tiltRadians = (tiltAbs * Math.PI) / 180;
+  const latitudeRadians = (Math.max(-85, Math.min(85, position.position.latitude)) * Math.PI) / 180;
+  const altitude = Math.min(
+    Math.max((ZOOM0_ALTITUDE * Math.max(Math.abs(Math.cos(latitudeRadians)), 0.01)) / (2 ** position.zoom), 100),
+    50_000_000,
+  );
+  const distanceForward = altitude
+    * Math.cos(tiltRadians)
+    * Math.tan(tiltRadians)
+    * NEGATIVE_TILT_TARGET_DISTANCE_SCALE;
+  const target = computeOffset({
+    origin: position.position,
+    distance: distanceForward,
+    heading: position.bearing,
+  });
+
+  return position.copy({
+    position: target,
+    zoom: position.zoom + NEGATIVE_TILT_ZOOM_OFFSET_AT_MAX_TILT * (tiltAbs / 60),
+    tilt: tiltAbs,
+  });
 }
 
 function normalizePadding(value: CameraOptions['padding'] | CameraOptions['paddings']) {

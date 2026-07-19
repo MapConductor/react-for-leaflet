@@ -71,6 +71,8 @@ export class LeafletProvider extends MapProvider {
       polygonController,
       groundImageController,
       rasterLayerController,
+      initial?.tilt ?? 0,
+      initial?.bearing ?? 0,
     );
     return this.controller;
   }

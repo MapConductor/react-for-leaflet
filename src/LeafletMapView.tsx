@@ -49,6 +49,7 @@ export function LeafletMapView({
   children,
   markerTilingOptions,
 }: LeafletMapViewProps) {
+  const outerContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [provider] = useState(() => new LeafletProvider());
   const [scope] = useState(() => new MapViewScope());
@@ -59,6 +60,26 @@ export function LeafletMapView({
   const [bubbleEntries, setBubbleEntries] = useState<InfoBubbleEntry[]>([]);
   const [animationEntries, setAnimationEntries] = useState<MarkerAnimationOverlayEntry[]>([]);
   const [, setCameraTick] = useState(0);
+  const [visualTilt, setVisualTilt] = useState(() => state.cameraPosition.tilt);
+  const [visualBearing, setVisualBearing] = useState(() => state.cameraPosition.bearing);
+  // Keep a larger Leaflet viewport behind the clipped container. This gives
+  // the transformed plane content on every side while keeping its center
+  // aligned with the camera center.
+  // Negative tilt is represented by a forward target shift in the controller;
+  // the rendered plane always uses the corresponding positive angle.
+  const experimentalTilt = Math.min(60, Math.abs(visualTilt));
+  const mapPlaneStyle: CSSProperties = {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: '200%',
+    height: '200%',
+    transform: `translate(-50%, -50%) rotateZ(${-visualBearing}deg) rotateX(${experimentalTilt}deg)`,
+    transformOrigin: '50% 50%',
+    transformStyle: 'flat',
+    willChange: 'transform',
+    backfaceVisibility: 'hidden',
+  };
 
   const onMapLoadedRef = useRef(onMapLoaded);
   const onMapClickRef = useRef(onMapClick);
@@ -74,6 +95,13 @@ export function LeafletMapView({
   onCameraMoveRef.current = onCameraMove;
   onCameraMoveEndRef.current = onCameraMoveEnd;
   onErrorRef.current = onError;
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      typedControllerRef.current?.getMap().invalidateSize({ pan: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [experimentalTilt, visualBearing]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -94,20 +122,34 @@ export function LeafletMapView({
       if (cancelled) return;
       const ctrl = rawController as LeafletMapViewController;
       typedControllerRef.current = ctrl;
+      // Keep the standard zoom control outside the transformed Leaflet map.
+      // Moving the DOM node does not remove Leaflet's registered handlers.
+      const zoomControl = containerRef.current?.querySelector<HTMLElement>('.leaflet-top.leaflet-left');
+      if (zoomControl && outerContainerRef.current) outerContainerRef.current.appendChild(zoomControl);
       state.setController(ctrl);
-      state.setCameraPositionChangeListener(() => setCameraTick(tick => tick + 1));
+      state.setCameraPositionChangeListener(camera => {
+        setVisualTilt(camera.tilt);
+        setVisualBearing(camera.bearing);
+        setCameraTick(tick => tick + 1);
+      });
       setController(ctrl);
 
       ctrl.setCameraMoveStartListener((camera: MapCameraPosition) => {
+        setVisualTilt(camera.tilt);
+        setVisualBearing(camera.bearing);
         state.updateCameraPosition(camera);
         onCameraMoveStartRef.current?.(camera);
       });
       ctrl.setCameraMoveListener((camera: MapCameraPosition) => {
+        setVisualTilt(camera.tilt);
+        setVisualBearing(camera.bearing);
         state.updateCameraPosition(camera);
         onCameraMoveRef.current?.(camera);
         setCameraTick(tick => tick + 1);
       });
       ctrl.setCameraMoveEndListener((camera: MapCameraPosition) => {
+        setVisualTilt(camera.tilt);
+        setVisualBearing(camera.bearing);
         state.updateCameraPosition(camera);
         onCameraMoveEndRef.current?.(camera);
         setCameraTick(tick => tick + 1);
@@ -165,6 +207,8 @@ export function LeafletMapView({
 
     return () => {
       cancelled = true;
+      const zoomControl = outerContainerRef.current?.querySelector<HTMLElement>('.leaflet-control-zoom');
+      zoomControl?.remove();
       state.setCameraPositionChangeListener(null);
       state.setController(null);
       typedControllerRef.current = null;
@@ -185,8 +229,8 @@ export function LeafletMapView({
 
   return (
     <MapContext.Provider value={{ controller, isReady }}>
-      <div style={{ position: 'relative', width: '100%', height: '100%', ...containerStyle }}>
-        <div ref={containerRef} className={className} style={{ width: '100%', height: '100%' }} />
+      <div ref={outerContainerRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', ...containerStyle }}>
+        <div ref={containerRef} className={className} style={mapPlaneStyle} />
         <MapAttributionOverlay
           scope={scope}
           camera={typedControllerRef.current?.getCameraPosition() ?? state.cameraPosition}

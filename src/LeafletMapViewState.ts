@@ -94,7 +94,7 @@ export class LeafletMapViewState
     const isUnspecified = target.zoom === 0 && target.bearing === 0 && target.tilt === 0;
     return isUnspecified
       ? this._cameraPosition.copy({ position: target.position })
-      : target.copy({ bearing: 0, tilt: 0 });
+      : target;
   }
 }
 
