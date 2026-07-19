@@ -57,7 +57,6 @@ export class LeafletMapViewController
   private logicalPosition = createGeoPoint({ latitude: 0, longitude: 0 });
   private logicalZoom = 0;
   private logicalBearing = 0;
-  private hasLogicalCameraOverride = false;
 
   constructor(
     readonly holder: LeafletMapViewHolder,
@@ -77,8 +76,7 @@ export class LeafletMapViewController
     this.logicalPosition = createGeoPoint({ latitude: initialCenter.lat, longitude: initialCenter.lng });
     this.logicalZoom = this.map.getZoom();
     this.logicalBearing = initialBearing;
-    this.hasLogicalCameraOverride = initialTilt !== 0 || initialBearing !== 0;
-    if (this.hasLogicalCameraOverride) {
+    if (initialTilt !== 0 || initialBearing !== 0) {
       const camera = toLeafletCamera(createMapCameraPosition({
         position: this.logicalPosition,
         zoom: this.logicalZoom,
@@ -139,7 +137,6 @@ export class LeafletMapViewController
     this.logicalPosition = position.position;
     this.logicalZoom = position.zoom;
     this.logicalBearing = position.bearing;
-    this.hasLogicalCameraOverride = position.tilt !== 0 || position.bearing !== 0;
     const camera = toLeafletCamera(position);
     this.map.setView(
       [camera.position.latitude, camera.position.longitude],
@@ -154,7 +151,6 @@ export class LeafletMapViewController
     this.logicalPosition = position.position;
     this.logicalZoom = position.zoom;
     this.logicalBearing = position.bearing;
-    this.hasLogicalCameraOverride = position.tilt !== 0 || position.bearing !== 0;
     const camera = toLeafletCamera(position);
     const durationSeconds = (options?.duration ?? 500) / 1000;
     this.map.flyTo(
@@ -181,11 +177,18 @@ export class LeafletMapViewController
   }
 
   getCameraPosition(): MapCameraPosition {
+    // Negative tilt is faked by shifting the real Leaflet center/zoom away from
+    // the logical camera (see toLeafletCamera below), so only that case needs
+    // to report the logical values instead of the map's live center/zoom.
+    // Positive tilt and bearing are purely cosmetic CSS transforms — Leaflet's
+    // own center/zoom are never touched for them, so live user pan/zoom must
+    // always be read from the map itself or it appears frozen.
+    const usesNegativeTiltOffset = this.logicalTilt < 0;
     const center = this.map.getCenter();
     return createMapCameraPosition({
-      position: this.hasLogicalCameraOverride ? this.logicalPosition : createGeoPoint({ latitude: center.lat, longitude: center.lng }),
-      zoom: this.hasLogicalCameraOverride ? this.logicalZoom : this.map.getZoom(),
-      bearing: this.hasLogicalCameraOverride ? this.logicalBearing : 0,
+      position: usesNegativeTiltOffset ? this.logicalPosition : createGeoPoint({ latitude: center.lat, longitude: center.lng }),
+      zoom: usesNegativeTiltOffset ? this.logicalZoom : this.map.getZoom(),
+      bearing: this.logicalBearing,
       tilt: this.logicalTilt,
       visibleRegion: this.getVisibleRegion(),
     });

@@ -19,7 +19,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "postbuild": "node -e \"const fs=require('fs'),path=require('path');const css=require.resolve('leaflet/dist/leaflet.css');fs.copyFileSync(css,'./dist/style.css');fs.cpSync(path.join(path.dirname(css),'images'),'./dist/images',{recursive:true})\"",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "dev": "tsup src/index.ts --format cjs,esm --watch",
     "clean": "rm -rf dist",
     "test": "echo 'No tests yet'"
   },
