@@ -240,14 +240,14 @@ export function LeafletMapView({
           <div style={{ position: 'absolute', inset: 0, zIndex: 650, pointerEvents: 'none' }}>
             <MarkerAnimationLayer
               entries={animationEntries}
-              resolveScreenOffset={entry => typedControllerRef.current!.holder.toScreenOffset(entry.state.position)}
+              resolveScreenOffset={entry => typedControllerRef.current!.holder.toOuterScreenOffset(entry.state.position)}
             />
           </div>
         )}
         {bubbleEntries.length > 0 && typedControllerRef.current && (
           <div style={{ position: 'absolute', inset: 0, zIndex: 750, pointerEvents: 'none', overflow: 'hidden' }}>
             {bubbleEntries.map(entry => {
-              const positionOffset = typedControllerRef.current!.holder.toScreenOffset(entry.positionProvider());
+              const positionOffset = typedControllerRef.current!.holder.toOuterScreenOffset(entry.positionProvider());
               const icon = entry.icon;
               const iconPixelSize = icon ? icon.iconSize * icon.scale : 0;
               return (
