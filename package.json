@@ -14,7 +14,9 @@
     "./style.css": "./dist/style.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.ja.md",
+    "README.es-419.md"
   ],
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",

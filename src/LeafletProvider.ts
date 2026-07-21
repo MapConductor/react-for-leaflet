@@ -1,10 +1,11 @@
 import {
   MapProvider,
   MarkerTilingOptions,
+  type GeoRectBounds,
   type MapConfig,
   type MapViewControllerInterface,
 } from '@mapconductor/js-sdk-core';
-import { map as createMap, tileLayer, type MapOptions } from 'leaflet';
+import { map as createMap, tileLayer, type LatLngBoundsExpression, type MapOptions } from 'leaflet';
 import type { LeafletMapDesignType } from './LeafletDesign';
 import { LeafletMapViewController } from './LeafletMapViewController';
 import { LeafletMapViewHolder } from './LeafletMapViewHolder';
@@ -29,8 +30,18 @@ export interface LeafletConfig extends MapConfig {
   mapDesignType: LeafletMapDesignType;
   maxZoom?: number;
   minZoom?: number;
+  /** Restricts panning/zooming so the viewport cannot leave this rectangle. */
+  restrictBounds?: GeoRectBounds;
   markerTilingOptions?: MarkerTilingOptions;
   options?: MapOptions;
+}
+
+function toLatLngBounds(bounds: GeoRectBounds | undefined): LatLngBoundsExpression | undefined {
+  if (!bounds?.southWest || !bounds.northEast) return undefined;
+  return [
+    [bounds.southWest.latitude, bounds.southWest.longitude],
+    [bounds.northEast.latitude, bounds.northEast.longitude],
+  ];
 }
 
 export class LeafletProvider extends MapProvider {
@@ -42,14 +53,32 @@ export class LeafletProvider extends MapProvider {
     if (!container) throw new Error('Container element not found');
 
     const initial = config.initCameraPosition;
+    const restrictBounds = toLatLngBounds(config.restrictBounds);
     const leafletMap = createMap(container, {
       minZoom: config.minZoom,
       maxZoom: config.maxZoom,
+      maxBounds: restrictBounds,
+      // Unlike the other providers' bounds restriction, Leaflet's maxBounds
+      // by itself only clamps the pan CENTER — it does not stop the user
+      // from zooming out far enough to see well beyond the box (confirmed
+      // empirically: without this, zooming out fully still showed half the
+      // globe). maxBoundsViscosity makes the pan clamp immediate instead of
+      // elastic; the minZoom below (see after container sizing) is what
+      // actually stops zooming out past the box.
+      ...(restrictBounds ? { maxBoundsViscosity: 1.0 } : {}),
       ...config.options,
     }).setView([
       initial?.position.latitude ?? 0,
       initial?.position.longitude ?? 0,
     ], initial?.zoom ?? 0);
+
+    if (restrictBounds && config.minZoom === undefined) {
+      // getBoundsZoom needs the container's rendered size, which is only
+      // available once the map has been attached above — this is the
+      // smallest zoom at which the box still fills the viewport, matching
+      // Google Maps' strictBounds / ArcGIS's geometry constraint behaviour.
+      leafletMap.setMinZoom(leafletMap.getBoundsZoom(restrictBounds, false));
+    }
 
     const design = config.mapDesignType;
     if (design.tileUrl) tileLayer(design.tileUrl, design.tileOptions).addTo(leafletMap);
