@@ -196,7 +196,6 @@ export class LeafletRasterLayerController extends RasterLayerController<GridLaye
     if (!state.visible) this.rasterLayerManager.removeEntity(state.id);
   }
 
-  has(state: RasterLayerState): boolean { return this.rasterLayerManager.hasEntity(state.id); }
   async updateInternal(state: RasterLayerState): Promise<void> { await this.upsert(state); }
   async removeInternal(id: string): Promise<void> { await this.removeById(id); }
 }

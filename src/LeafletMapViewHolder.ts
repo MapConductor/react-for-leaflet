@@ -31,10 +31,6 @@ export class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Leaflet
     return { x: point.x, y: point.y };
   }
 
-  async fromScreenOffset(offset: Offset): Promise<GeoPoint> {
-    return this.fromScreenOffsetSync(offset);
-  }
-
   fromScreenOffsetSync(offset: Offset): GeoPoint {
     const latLng = this.map.containerPointToLatLng([offset.x, offset.y]);
     return createGeoPoint({ latitude: latLng.lat, longitude: latLng.lng });

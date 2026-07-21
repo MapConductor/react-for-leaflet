@@ -17,10 +17,6 @@ import {
   type GroundImageEntity,
   type GroundImageState,
   type GeoPoint,
-  type OnCircleEventHandler,
-  type OnGroundImageEventHandler,
-  type OnPolygonEventHandler,
-  type OnPolylineEventHandler,
   type PolygonEntity,
   type PolygonState,
   type PolylineEntity,
@@ -97,10 +93,6 @@ export class LeafletCircleController extends CircleController<LeafletCircle> {
       if (state.clickable) this.dispatchClick({ state, clicked: fromLeafletEvent(event) });
     };
   }
-
-  async composition(data: CircleState[]): Promise<void> { await this.add(data); }
-  has(state: CircleState): boolean { return this.circleManager.hasEntity(state.id); }
-  setOnClickListener(listener: OnCircleEventHandler | null): void { this.clickListener = listener; }
 }
 
 export class LeafletPolylineRenderer extends AbstractPolylineOverlayRenderer<
@@ -146,10 +138,6 @@ export class LeafletPolylineController extends PolylineController<LeafletPolylin
       clicked: fromLeafletEvent(event),
     });
   }
-
-  async composition(data: PolylineState[]): Promise<void> { await this.add(data); }
-  has(state: PolylineState): boolean { return this.polylineManager.hasEntity(state.id); }
-  setOnClickListener(listener: OnPolylineEventHandler | null): void { this.clickListener = listener; }
 }
 
 export class LeafletPolygonRenderer extends AbstractPolygonOverlayRenderer<
@@ -256,10 +244,6 @@ export class LeafletPolygonController extends PolygonController<LeafletPolygon> 
       clicked: fromLeafletEvent(event),
     });
   }
-
-  async composition(data: PolygonState[]): Promise<void> { await this.add(data); }
-  has(state: PolygonState): boolean { return this.polygonManager.hasEntity(state.id); }
-  setOnClickListener(listener: OnPolygonEventHandler | null): void { this.clickListener = listener; }
 }
 
 export class LeafletGroundImageRenderer extends AbstractGroundImageOverlayRenderer<
@@ -314,8 +298,4 @@ export class LeafletGroundImageController extends GroundImageController<ImageOve
       clicked: fromLeafletEvent(event),
     });
   }
-
-  async composition(data: GroundImageState[]): Promise<void> { await this.add(data); }
-  has(state: GroundImageState): boolean { return this.groundImageManager.hasEntity(state.id); }
-  setOnClickListener(listener: OnGroundImageEventHandler | null): void { this.clickListener = listener; }
 }
