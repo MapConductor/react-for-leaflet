@@ -10,6 +10,7 @@ import {
 } from '@mapconductor/js-sdk-react';
 import {
   MarkerTilingOptions,
+  createDefaultIcon,
   type GeoPoint,
   type GeoRectBounds,
   type MapCameraPosition,
@@ -33,6 +34,94 @@ export interface LeafletMapViewProps extends MapViewBaseProps<LeafletMapViewStat
   onError?: (error: Error) => void;
   children?: ReactNode;
   markerTilingOptions?: MarkerTilingOptions;
+}
+
+/**
+ * While the 2D view fakes tilt with a CSS `rotateX` on the map plane, native
+ * Leaflet DOM markers would be flattened against the ground, so they're hidden
+ * and their upright "billboards" are drawn here instead. A single `<canvas>`
+ * (redrawn on a rAF so markers stay glued to the map during pans/zooms/tilts)
+ * lives in the untransformed outer container and positions each icon via the
+ * tilt-aware `toOuterScreenOffset`. Only non-tiled markers are drawn; tiled
+ * markers are painted by the raster tile layer, which is part of the tilted
+ * plane. The canvas is draw-only (`pointer-events: none`); clicks flow through
+ * the map's tap handler. Mirrors HERE's `HereTiltMarkerCanvas`.
+ */
+function LeafletTiltMarkerCanvas({
+  controller,
+  active,
+}: {
+  controller: LeafletMapViewController;
+  active: boolean;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!active) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+
+    const images = new Map<string, HTMLImageElement>();
+    const imageFor = (url: string): HTMLImageElement | null => {
+      let img = images.get(url);
+      if (!img) {
+        img = new Image();
+        img.src = url;
+        images.set(url, img);
+      }
+      return img.complete && img.naturalWidth > 0 ? img : null;
+    };
+
+    let raf = 0;
+    const draw = () => {
+      const parent = canvas.parentElement;
+      const width = parent?.clientWidth ?? 0;
+      const height = parent?.clientHeight ?? 0;
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const holder = controller.holder;
+      const items = controller
+        .getNonTiledMarkerStates()
+        // Markers currently animating (Drop/Bounce) are drawn by the screen-space
+        // animation overlay; drawing them here too would leave a static duplicate.
+        .filter(marker => marker.getAnimation() == null)
+        .map(marker => {
+          const bitmapIcon = (marker.icon ?? createDefaultIcon()).toBitmapIcon();
+          const screen = holder.toOuterScreenOffset(marker.position);
+          return { bitmapIcon, x: screen.x, y: screen.y };
+        })
+        // Nearer markers (lower on screen) paint last so they overlap those
+        // behind them, matching the tilted perspective.
+        .sort((a, b) => a.y - b.y);
+
+      for (const { bitmapIcon, x, y } of items) {
+        const img = imageFor(bitmapIcon.url);
+        if (!img) continue;
+        const { width: w, height: h } = bitmapIcon.size;
+        ctx.drawImage(img, x - bitmapIcon.anchor.x * w, y - bitmapIcon.anchor.y * h, w, h);
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [active, controller]);
+
+  if (!active) return null;
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ position: 'absolute', inset: 0, zIndex: 600, pointerEvents: 'none' }}
+    />
+  );
 }
 
 export function LeafletMapView({
@@ -72,6 +161,9 @@ export function LeafletMapView({
   // Negative tilt is represented by a forward target shift in the controller;
   // the rendered plane always uses the corresponding positive angle.
   const experimentalTilt = Math.min(60, Math.abs(visualTilt));
+  // While tilted, the CSS `rotateX` below lays the native DOM markers flat, so
+  // they're hidden and drawn as upright canvas billboards instead.
+  const isTilted = experimentalTilt > 0.5;
   const mapPlaneStyle: CSSProperties = {
     position: 'absolute',
     left: '50%',
@@ -106,6 +198,13 @@ export function LeafletMapView({
     });
     return () => cancelAnimationFrame(frame);
   }, [experimentalTilt, visualBearing]);
+
+  // Swap between native DOM markers (untilted) and upright canvas billboards
+  // (tilted). New markers added while tilted inherit the hidden state in the
+  // renderer's onAdd, so this only re-applies the toggle on tilt/controller change.
+  useEffect(() => {
+    controller?.setNativeMarkersVisible(!isTilted);
+  }, [controller, isTilted]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -236,6 +335,7 @@ export function LeafletMapView({
     <MapContext.Provider value={{ controller, isReady }}>
       <div ref={outerContainerRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', ...containerStyle }}>
         <div ref={containerRef} className={className} style={mapPlaneStyle} />
+        {controller && <LeafletTiltMarkerCanvas controller={controller} active={isTilted} />}
         <MapAttributionOverlay
           scope={scope}
           camera={typedControllerRef.current?.getCameraPosition() ?? state.cameraPosition}

@@ -13,9 +13,34 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
   LeafletMapViewHolder,
   LeafletMarker
 > {
+  /**
+   * Whether the native Leaflet DOM markers should be visible. The 2D view fakes
+   * camera tilt with a CSS `rotateX` on the map plane, which lays the DOM marker
+   * icons flat against the ground. While tilted the view hides these native
+   * markers (via `setNativeVisible(false)`) and draws upright, billboarded icons
+   * on a canvas instead. Markers created while hidden must inherit this state,
+   * so onAdd applies it too.
+   */
+  private nativeVisible = true;
+
   constructor(holder: LeafletMapViewHolder) {
     super({ holder });
     this.supportsAnimationOverlay = true;
+  }
+
+  /** Whether native markers should currently be visible (see `nativeVisible`). */
+  get isNativeVisible(): boolean {
+    return this.nativeVisible;
+  }
+
+  /**
+   * Remembers whether native markers should be visible so markers added
+   * afterwards (see onAdd) inherit the state. The live entities are owned by the
+   * controller's MarkerManager, so toggling existing markers is done there
+   * (LeafletMarkerController.setNativeMarkersVisible), not here.
+   */
+  setNativeVisible(visible: boolean): void {
+    this.nativeVisible = visible;
   }
 
   async onAdd(data: AddParams[]): Promise<(LeafletMarker | null)[]> {
@@ -26,8 +51,15 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
         zIndexOffset: state.zIndex,
         keyboard: false,
         bubblingMouseEvents: false,
+        opacity: this.nativeVisible ? 1 : 0,
       });
       actual.addTo(this.holder.map);
+      // Markers created while tilted inherit the hidden, non-interactive state
+      // (see LeafletMarkerController.setNativeMarkersVisible).
+      if (!this.nativeVisible) {
+        const element = actual.getElement();
+        if (element) element.style.pointerEvents = 'none';
+      }
       return actual;
     });
   }
@@ -56,7 +88,11 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
   }
 
   override setMarkerVisible(entity: MarkerEntity<LeafletMarker>, visible: boolean): void {
-    entity.marker?.setOpacity(visible ? 1 : 0);
+    // The marker-animation overlay hides the native marker during a Drop/Bounce
+    // and restores it afterwards. While the CSS tilt hack is active, native
+    // markers must stay hidden (canvas billboards are drawn instead), so never
+    // let the restore re-show a native marker while `nativeVisible` is false.
+    entity.marker?.setOpacity(visible && this.nativeVisible ? 1 : 0);
   }
 
   private toLeafletIcon(bitmapIcon: AddParams['bitmapIcon']) {

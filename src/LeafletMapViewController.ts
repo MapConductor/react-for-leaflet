@@ -15,6 +15,7 @@ import {
   type MarkerAnimationOverlayHost,
   type MarkerCapable,
   type MarkerState,
+  type Offset,
   type OnCircleEventHandler,
   type OnGroundImageEventHandler,
   type OnMapInitializedHandler,
@@ -117,6 +118,17 @@ export class LeafletMapViewController
         this.markerController.dispatchClick(tiled.state);
         return;
       }
+      // While tilted, native markers are hidden and non-interactive (drawn as
+      // upright canvas billboards), so resolve non-tiled marker clicks in the
+      // billboards' screen space instead of via the flattened native DOM events.
+      if (!this.markerController.isNativeMarkersVisible()) {
+        const outer = this.outerOffsetFromEvent(event.originalEvent);
+        const entity = outer ? this.markerController.findAtScreen(outer) : null;
+        if (entity?.state.clickable) {
+          this.markerController.dispatchClick(entity.state);
+          return;
+        }
+      }
       this.notifyMapClick(clicked);
     });
     this.map.on('contextmenu', (event: LeafletMouseEvent) => {
@@ -130,6 +142,20 @@ export class LeafletMapViewController
   override setMapInitializedListener(listener: OnMapInitializedHandler | null): void {
     super.setMapInitializedListener(listener);
     if (listener && !this.destroyed) queueMicrotask(() => this.notifyMapInitialized());
+  }
+
+  /**
+   * The pointer position of a DOM event in the outer (untransformed) container's
+   * pixel space — the same space the tilt billboard canvas and `findAtScreen`
+   * use (see LeafletMapViewHolder.toOuterScreenOffset).
+   */
+  private outerOffsetFromEvent(originalEvent: Event | undefined): Offset | null {
+    const source = originalEvent as MouseEvent | undefined;
+    if (!source || typeof source.clientX !== 'number') return null;
+    const outer = this.holder.mapView.parentElement;
+    if (!outer) return null;
+    const rect = outer.getBoundingClientRect();
+    return { x: source.clientX - rect.left, y: source.clientY - rect.top };
   }
 
   async moveCamera(position: MapCameraPosition): Promise<boolean> {
@@ -234,6 +260,11 @@ export class LeafletMapViewController
   setOnMarkerAnimateEnd(listener: OnMarkerEventHandler | null): void { this.markerController.setOnAnimateEnd(listener); }
   setMarkerAnimationOverlayHost(host: MarkerAnimationOverlayHost | null): void { this.markerController.setMarkerAnimationOverlayHost(host); }
 
+  /** Hide/show native DOM markers when the CSS tilt hack is toggled (see LeafletMapView). */
+  setNativeMarkersVisible(visible: boolean): void { this.markerController.setNativeMarkersVisible(visible); }
+  /** Live states of the non-tiled markers, drawn as upright billboards while tilted. */
+  getNonTiledMarkerStates(): MarkerState[] { return this.markerController.getNonTiledMarkerStates(); }
+
   async compositionCircles(data: CircleState[]): Promise<void> { await this.circleController.composition(data); }
   async updateCircle(state: CircleState): Promise<void> { await this.circleController.update(state); }
   hasCircle(state: CircleState): boolean { return this.circleController.has(state); }
@@ -283,11 +314,26 @@ const NEGATIVE_TILT_ZOOM_OFFSET_AT_MAX_TILT = -0.9;
 const ZOOM0_ALTITUDE = 171_319_879;
 
 /**
+ * Quantize a programmatic zoom target to the nearest integer, mirroring how
+ * Google Maps 2D (the project-wide camera reference) snaps zoom. Keeps Leaflet
+ * aligned with Google at fractional demo zooms (Oahu 9.5 -> 10, Kiribati
+ * 4.5 -> 5) instead of rendering the true half level Google never shows.
+ */
+function snapZoomToGoogle(zoom: number): number {
+  return Math.round(zoom);
+}
+
+/**
  * Leaflet cannot pitch the camera upward. For negative tilt, move the ground
  * target forward and render the equivalent positive CSS tilt instead.
  */
 function toLeafletCamera(position: MapCameraPosition): MapCameraPosition {
-  if (position.tilt >= 0) return position;
+  // Google Maps 2D (the project-wide reference) snaps zoom to the nearest
+  // integer (9.5 -> 10, 4.5 -> 5); Leaflet renders the true fractional zoom,
+  // leaving the two up to half a level apart at fractional targets (e.g. Oahu
+  // 9.5). Quantize programmatic targets the way Google does. Live zoom reported
+  // from gestures (map.getZoom in getCameraPosition) stays fractional.
+  if (position.tilt >= 0) return position.copy({ zoom: snapZoomToGoogle(position.zoom) });
 
   const tiltAbs = Math.min(Math.max(Math.abs(position.tilt), 0), 60);
   const tiltRadians = (tiltAbs * Math.PI) / 180;
