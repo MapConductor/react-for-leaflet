@@ -3,9 +3,12 @@ import {
   AbstractGroundImageOverlayRenderer,
   AbstractPolygonOverlayRenderer,
   AbstractPolylineOverlayRenderer,
+  buildUnwrappedPolygonRings,
+  buildUnwrappedPolylinePath,
+  circleToRing,
+  closeRing,
   CircleController,
   CircleManager,
-  createInterpolatePoints,
   GroundImageController,
   GroundImageManager,
   PolygonController,
@@ -17,25 +20,23 @@ import {
   type GroundImageEntity,
   type GroundImageState,
   type GeoPoint,
+  type MapCameraPosition,
   type PolygonEntity,
   type PolygonState,
   type PolylineEntity,
   type PolylineState,
 } from '@mapconductor/js-sdk-core';
 import {
-  circle,
   imageOverlay,
   latLngBounds,
   polygon,
   polyline,
-  type Circle as LeafletCircle,
   type ImageOverlay,
-  type LeafletMouseEvent,
   type Polygon as LeafletPolygon,
   type Polyline as LeafletPolyline,
 } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
-import { ensurePane, fromLeafletEvent, toLatLng } from '../helpers';
+import { ensurePane } from '../helpers';
 
 const VECTOR_BASE_Z_INDEX = 400;
 const GROUND_IMAGE_BASE_Z_INDEX = 300;
@@ -50,22 +51,30 @@ function vectorPane(holder: LeafletMapViewHolder, kind: string, id: string, zInd
 
 export class LeafletCircleRenderer extends AbstractCircleOverlayRenderer<
   LeafletMapViewHolder,
-  LeafletCircle
+  LeafletPolygon
 > {
-  onClick: ((state: CircleState, event: LeafletMouseEvent) => void) | null = null;
-
-  async createCircle(state: CircleState): Promise<LeafletCircle> {
-    const actual = circle(toLatLng(state.center), {
-      radius: state.radiusMeters,
+  async createCircle(state: CircleState): Promise<LeafletPolygon> {
+    // Circle polygon from the shared core geometry (circleToRing), replacing
+    // Leaflet's native L.circle so the shape definition (geodesic vs planar)
+    // is unified across providers. The ring is unwrapped around the center
+    // longitude; Leaflet accepts out-of-range longitudes, so an
+    // antimeridian-crossing circle stays continuous without splitting.
+    //
+    // Non-interactive so the click passes through to LeafletMapViewController's
+    // map click handler, where the shared core geometric hit-test (with tap
+    // tolerance) resolves it — the same overlay-click path every other provider
+    // uses, instead of Leaflet's native layer click.
+    const ring = closeRing(
+      circleToRing(state.center, state.radiusMeters, state.geodesic),
+    ).map((point): [number, number] => [point.latitude, point.longitude]);
+    const actual = polygon(ring, {
       color: state.strokeColor,
       weight: state.strokeWidth,
       fillColor: state.fillColor,
       fillOpacity: 1,
-      interactive: state.clickable,
-      bubblingMouseEvents: false,
+      interactive: false,
       pane: vectorPane(this.holder, 'circle', state.id, state.zIndex ?? 0),
     }).addTo(this.holder.map);
-    actual.on('click', event => this.onClick?.(state, event));
     return actual;
   }
 
@@ -73,25 +82,31 @@ export class LeafletCircleRenderer extends AbstractCircleOverlayRenderer<
     circle: actual,
     current,
   }: {
-    circle: LeafletCircle;
-    current: CircleEntity<LeafletCircle>;
-    prev: CircleEntity<LeafletCircle>;
-  }): Promise<LeafletCircle> {
+    circle: LeafletPolygon;
+    current: CircleEntity<LeafletPolygon>;
+    prev: CircleEntity<LeafletPolygon>;
+  }): Promise<LeafletPolygon> {
     actual.remove();
     return this.createCircle(current.state);
   }
 
-  async removeCircle(entity: CircleEntity<LeafletCircle>): Promise<void> {
+  async removeCircle(entity: CircleEntity<LeafletPolygon>): Promise<void> {
     entity.circle.remove();
   }
 }
 
-export class LeafletCircleController extends CircleController<LeafletCircle> {
+export class LeafletCircleController extends CircleController<LeafletPolygon> {
   constructor(renderer: LeafletCircleRenderer) {
     super({ circleManager: new CircleManager(), renderer });
-    renderer.onClick = (state, event) => {
-      if (state.clickable) this.dispatchClick({ state, clicked: fromLeafletEvent(event) });
-    };
+  }
+
+  // Geometric hit-test from a map click (tap inside the circle radius), mirroring
+  // every other provider.
+  handleMapClick(clicked: GeoPoint): boolean {
+    const entity = this.find(clicked);
+    if (!entity || !entity.state.clickable) return false;
+    this.dispatchClick({ state: entity.state, clicked });
+    return true;
   }
 }
 
@@ -99,17 +114,15 @@ export class LeafletPolylineRenderer extends AbstractPolylineOverlayRenderer<
   LeafletMapViewHolder,
   LeafletPolyline
 > {
-  onClick: ((state: PolylineState, event: LeafletMouseEvent) => void) | null = null;
-
   async createPolyline(state: PolylineState): Promise<LeafletPolyline> {
+    // Non-interactive: clicks are resolved by the shared core geometric hit-test
+    // (with tap tolerance) in the map click handler, like every other provider.
     const actual = polyline(pathToLatLngs(state.points, state.geodesic), {
       color: state.strokeColor,
       weight: state.strokeWidth,
-      interactive: state.onClick != null,
-      bubblingMouseEvents: false,
+      interactive: false,
       pane: vectorPane(this.holder, 'polyline', state.id, state.zIndex),
     }).addTo(this.holder.map);
-    actual.on('click', event => this.onClick?.(state, event));
     return actual;
   }
 
@@ -133,10 +146,17 @@ export class LeafletPolylineRenderer extends AbstractPolylineOverlayRenderer<
 export class LeafletPolylineController extends PolylineController<LeafletPolyline> {
   constructor(renderer: LeafletPolylineRenderer) {
     super({ polylineManager: new PolylineManager(), renderer });
-    renderer.onClick = (state, event) => this.dispatchClick({
-      state,
-      clicked: fromLeafletEvent(event),
-    });
+  }
+
+  // Geometric hit-test from a map click, mirroring every other provider: resolve
+  // the nearest polyline within the shared tap tolerance and dispatch the closest
+  // point as `clicked`, instead of Leaflet's thin native path-click hit area.
+  handleMapClick(clicked: GeoPoint, camera: MapCameraPosition | null): boolean {
+    if (camera) void this.onCameraChanged(camera);
+    const hit = this.findWithClosestPoint(clicked);
+    if (!hit) return false;
+    this.dispatchClick({ state: hit.entity.state, clicked: hit.closestPoint });
+    return true;
   }
 }
 
@@ -144,40 +164,32 @@ export class LeafletPolygonRenderer extends AbstractPolygonOverlayRenderer<
   LeafletMapViewHolder,
   LeafletPolygon
 > {
-  onClick: ((state: PolygonState, event: LeafletMouseEvent) => void) | null = null;
-
   async createPolygon(state: PolygonState): Promise<LeafletPolygon> {
+    // Non-interactive: clicks are resolved by the shared core geometric hit-test
+    // (point-in-polygon) in the map click handler, like every other provider.
     const actual = polygon(polygonLatLngs(state), {
       color: state.strokeColor,
       weight: state.strokeWidth,
       fillColor: state.fillColor,
       fillOpacity: 1,
-      interactive: state.onClick != null,
-      bubblingMouseEvents: false,
+      interactive: false,
       pane: vectorPane(this.holder, 'polygon', state.id, state.zIndex),
     }).addTo(this.holder.map);
-    actual.on('click', event => this.onClick?.(state, event));
     return actual;
   }
 
   async updatePolygonProperties({
     polygon: actual,
     current,
-    prev,
   }: {
     polygon: LeafletPolygon;
     current: PolygonEntity<LeafletPolygon>;
     prev: PolygonEntity<LeafletPolygon>;
   }): Promise<LeafletPolygon> {
     const state = current.state;
-    if ((prev.state.onClick != null) !== (state.onClick != null)) {
-      actual.remove();
-      return this.createPolygon(state);
-    }
-
     // Keep the Leaflet Path and SVG renderer mounted while its vertices move.
-    // Drag events can arrive every frame, so rebuilding the layer and its event
-    // target for each point would add avoidable DOM and renderer churn.
+    // Drag events can arrive every frame, so rebuilding the layer for each point
+    // would add avoidable DOM and renderer churn.
     actual.setLatLngs(polygonLatLngs(state));
     actual.setStyle({
       color: state.strokeColor,
@@ -186,8 +198,6 @@ export class LeafletPolygonRenderer extends AbstractPolygonOverlayRenderer<
       fillOpacity: 1,
     });
     vectorPane(this.holder, 'polygon', state.id, state.zIndex);
-    actual.off('click');
-    actual.on('click', event => this.onClick?.(state, event));
     return actual;
   }
 
@@ -197,52 +207,43 @@ export class LeafletPolygonRenderer extends AbstractPolygonOverlayRenderer<
 }
 
 function polygonLatLngs(state: PolygonState): [number, number][][] {
-  return [state.points, ...state.holes].map(ring =>
-    polygonRingToLatLngs(ring, state.geodesic),
+  // Core pipeline: densify each ring (geodesic great-circle or straight-in-
+  // lat/lng linear interpolation, matching the Android renderers) and unwrap
+  // the longitudes into the outer ring's world copy. Leaflet accepts unwrapped
+  // longitudes and auto-closes rings, so the open rings are passed as-is.
+  const { outerRings, holeRings } = buildUnwrappedPolygonRings(
+    state.points,
+    state.holes,
+    state.geodesic,
+  );
+  return [...outerRings, ...holeRings].map(ring =>
+    ring.map((point): [number, number] => [point.latitude, point.longitude]),
   );
 }
 
-function polygonRingToLatLngs(points: GeoPoint[], geodesic: boolean): [number, number][] {
-  if (points.length === 0) return [];
-
-  const closedPoints = samePoint(points[0], points[points.length - 1])
-    ? points
-    : [...points, points[0]];
-  return pathToLatLngs(closedPoints, geodesic);
-}
-
 function pathToLatLngs(points: GeoPoint[], geodesic: boolean): [number, number][] {
-  if (points.length === 0) return [];
-
-  const renderedPoints = geodesic ? createInterpolatePoints(points) : points;
-
-  // Geographic interpolation normalizes longitude to [-180, 180]. Leaflet
-  // accepts unwrapped longitudes, so keep adjacent points in the same world
-  // copy to avoid drawing a geodesic segment across the whole map when it
-  // crosses the antimeridian.
-  let previousLongitude: number | null = null;
-  return renderedPoints.map(point => {
-    let longitude = point.normalize().longitude;
-    if (previousLongitude != null) {
-      while (longitude - previousLongitude > 180) longitude -= 360;
-      while (longitude - previousLongitude < -180) longitude += 360;
-    }
-    previousLongitude = longitude;
-    return [point.latitude, longitude];
-  });
-}
-
-function samePoint(a: GeoPoint, b: GeoPoint): boolean {
-  return a.latitude === b.latitude && a.longitude === b.longitude;
+  // Core pipeline for both modes: densification (great-circle when geodesic,
+  // linear lat/lng otherwise — Android's straight-line semantics) + longitude
+  // unwrap. Leaflet accepts unwrapped longitudes, so a segment crossing the
+  // antimeridian stays in the same world copy instead of being drawn the long
+  // way around the map.
+  return buildUnwrappedPolylinePath(points, geodesic).map(
+    (point): [number, number] => [point.latitude, point.longitude],
+  );
 }
 
 export class LeafletPolygonController extends PolygonController<LeafletPolygon> {
   constructor(renderer: LeafletPolygonRenderer) {
     super({ polygonManager: new PolygonManager(), renderer });
-    renderer.onClick = (state, event) => this.dispatchClick({
-      state,
-      clicked: fromLeafletEvent(event),
-    });
+  }
+
+  // Geometric hit-test from a map click (inside the polygon fill), mirroring
+  // every other provider.
+  handleMapClick(clicked: GeoPoint): boolean {
+    const entity = this.find(clicked);
+    if (!entity) return false;
+    this.dispatchClick({ state: entity.state, clicked });
+    return true;
   }
 }
 
@@ -250,8 +251,6 @@ export class LeafletGroundImageRenderer extends AbstractGroundImageOverlayRender
   LeafletMapViewHolder,
   ImageOverlay
 > {
-  onClick: ((state: GroundImageState, event: LeafletMouseEvent) => void) | null = null;
-
   async createGroundImage(state: GroundImageState): Promise<ImageOverlay | null> {
     const { southWest, northEast } = state.bounds;
     if (!southWest || !northEast) return null;
@@ -260,16 +259,16 @@ export class LeafletGroundImageRenderer extends AbstractGroundImageOverlayRender
       `mc-ground-image-${state.id}`,
       GROUND_IMAGE_BASE_Z_INDEX,
     );
+    // Non-interactive: clicks are resolved by the shared core geometric hit-test
+    // (inside the image bounds) in the map click handler, like every other provider.
     const actual = imageOverlay(state.imageUrl, latLngBounds(
       [southWest.latitude, southWest.longitude],
       [northEast.latitude, northEast.longitude],
     ), {
       opacity: state.opacity,
-      interactive: state.onClick != null,
-      bubblingMouseEvents: false,
+      interactive: false,
       pane,
     }).addTo(this.holder.map);
-    actual.on('click', event => this.onClick?.(state, event));
     return actual;
   }
 
@@ -293,9 +292,14 @@ export class LeafletGroundImageRenderer extends AbstractGroundImageOverlayRender
 export class LeafletGroundImageController extends GroundImageController<ImageOverlay> {
   constructor(renderer: LeafletGroundImageRenderer) {
     super({ groundImageManager: new GroundImageManager(), renderer });
-    renderer.onClick = (state, event) => this.dispatchClick({
-      state,
-      clicked: fromLeafletEvent(event),
-    });
+  }
+
+  // Geometric hit-test from a map click (inside the ground image bounds),
+  // mirroring every other provider.
+  handleMapClick(clicked: GeoPoint): boolean {
+    const entity = this.find(clicked);
+    if (!entity) return false;
+    this.dispatchClick({ state: entity.state, clicked });
+    return true;
   }
 }

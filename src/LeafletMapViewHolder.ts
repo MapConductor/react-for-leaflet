@@ -27,7 +27,14 @@ export class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Leaflet
   }
 
   toScreenOffset(position: GeoPointInterface): Offset {
-    const point = this.map.latLngToContainerPoint([position.latitude, position.longitude]);
+    // Leaflet projects longitude literally (Web Mercator is linear in lng) and
+    // does not pick the world copy nearest the viewport, so a position just
+    // across the antimeridian projects ~360° off-screen and screen-space
+    // overlays (marker drop/bounce animations, info bubbles) render off-view.
+    // Shift the longitude into the same world copy as the current center first.
+    const centerLng = this.map.getCenter().lng;
+    const lng = position.longitude + 360 * Math.round((centerLng - position.longitude) / 360);
+    const point = this.map.latLngToContainerPoint([position.latitude, lng]);
     return { x: point.x, y: point.y };
   }
 
@@ -50,7 +57,10 @@ export class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Leaflet
    * the visible marker.
    */
   toOuterScreenOffset(position: GeoPointInterface): Offset {
-    const point = this.map.latLngToContainerPoint([position.latitude, position.longitude]);
+    // Same antimeridian world-copy correction as toScreenOffset (see above).
+    const centerLng = this.map.getCenter().lng;
+    const lng = position.longitude + 360 * Math.round((centerLng - position.longitude) / 360);
+    const point = this.map.latLngToContainerPoint([position.latitude, lng]);
     return this.innerToOuterOffset(point.x, point.y);
   }
 

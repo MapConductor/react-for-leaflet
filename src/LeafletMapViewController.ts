@@ -129,6 +129,16 @@ export class LeafletMapViewController
           return;
         }
       }
+      // Overlay clicks are resolved here by the shared core geometric hit-tests
+      // (with tap tolerance), exactly like every other provider. The Leaflet
+      // overlay layers are rendered non-interactive so clicks pass through to
+      // this handler instead of hitting Leaflet's thin native path/shape click.
+      // Order: polyline, polygon, circle, ground image.
+      const camera = this.getCameraPosition() ?? null;
+      if (this.polylineController.handleMapClick(clicked, camera)) return;
+      if (this.polygonController.handleMapClick(clicked)) return;
+      if (this.circleController.handleMapClick(clicked)) return;
+      if (this.groundImageController.handleMapClick(clicked)) return;
       this.notifyMapClick(clicked);
     });
     this.map.on('contextmenu', (event: LeafletMouseEvent) => {

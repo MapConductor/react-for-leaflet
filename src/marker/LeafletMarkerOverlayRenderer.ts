@@ -7,7 +7,6 @@ import {
 } from '@mapconductor/js-sdk-core';
 import { icon, marker, type Marker as LeafletMarker } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
-import { toLatLng } from '../helpers';
 
 export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
   LeafletMapViewHolder,
@@ -23,9 +22,35 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
    */
   private nativeVisible = true;
 
+  // Leaflet places a DOM marker at a single absolute longitude and does NOT
+  // replicate it across world copies (unlike the symbol layers other providers
+  // use). So a marker whose position is normalized to [-180,180] renders ~360°
+  // off-screen once the map is panned across the antimeridian (e.g. dropping a
+  // marker on the polyline near the US west coast). We therefore render each
+  // marker at the world copy nearest the current map center, tracking every
+  // marker's logical position here and re-projecting them all whenever the map
+  // moves so they stay visible across copies.
+  private readonly logicalPositions = new Map<LeafletMarker, GeoPoint>();
+  private readonly reprojectMarkers = () => {
+    for (const [actual, position] of this.logicalPositions) {
+      actual.setLatLng(this.nearestCopyLatLng(position));
+    }
+  };
+
   constructor(holder: LeafletMapViewHolder) {
     super({ holder });
     this.supportsAnimationOverlay = true;
+    this.holder.map.on('moveend', this.reprojectMarkers);
+  }
+
+  /**
+   * The marker's lat/lng shifted so its longitude lands in the same world copy
+   * as the current map center (see `logicalPositions`).
+   */
+  private nearestCopyLatLng(position: GeoPoint): [number, number] {
+    const centerLng = this.holder.map.getCenter().lng;
+    const longitude = position.longitude + 360 * Math.round((centerLng - position.longitude) / 360);
+    return [position.latitude, longitude];
   }
 
   /** Whether native markers should currently be visible (see `nativeVisible`). */
@@ -45,7 +70,7 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
 
   async onAdd(data: AddParams[]): Promise<(LeafletMarker | null)[]> {
     return data.map(({ state, bitmapIcon }) => {
-      const actual = marker(toLatLng(state.position), {
+      const actual = marker(this.nearestCopyLatLng(state.position), {
         icon: this.toLeafletIcon(bitmapIcon),
         draggable: state.draggable,
         zIndexOffset: state.zIndex,
@@ -53,6 +78,7 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
         bubblingMouseEvents: false,
         opacity: this.nativeVisible ? 1 : 0,
       });
+      this.logicalPositions.set(actual, state.position);
       actual.addTo(this.holder.map);
       // Markers created while tilted inherit the hidden, non-interactive state
       // (see LeafletMarkerController.setNativeMarkersVisible).
@@ -68,7 +94,8 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
     return data.map(({ current, prev, bitmapIcon }) => {
       const actual = prev.marker;
       if (!actual) return null;
-      actual.setLatLng(toLatLng(current.state.position));
+      this.logicalPositions.set(actual, current.state.position);
+      actual.setLatLng(this.nearestCopyLatLng(current.state.position));
       actual.setIcon(this.toLeafletIcon(bitmapIcon));
       actual.setZIndexOffset(current.state.zIndex);
       if (current.state.draggable) actual.dragging?.enable();
@@ -78,13 +105,17 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
   }
 
   async onRemove(data: MarkerEntity<LeafletMarker>[]): Promise<void> {
-    for (const entity of data) entity.marker?.remove();
+    for (const entity of data) {
+      if (entity.marker) this.logicalPositions.delete(entity.marker);
+      entity.marker?.remove();
+    }
   }
 
   async onPostProcess(): Promise<void> {}
 
   setMarkerPosition(entity: MarkerEntity<LeafletMarker>, position: GeoPoint): void {
-    entity.marker?.setLatLng(toLatLng(position));
+    if (entity.marker) this.logicalPositions.set(entity.marker, position);
+    entity.marker?.setLatLng(this.nearestCopyLatLng(position));
   }
 
   override setMarkerVisible(entity: MarkerEntity<LeafletMarker>, visible: boolean): void {
