@@ -212,10 +212,7 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
 
     this.tileRouteId ??= `mc-leaflet-tile-${generateId()}`;
     const server = LocalTileServer.startServer();
-    const renderer = new MarkerTileRenderer(tiledStates, {
-      tileSize: 256,
-      iconScaleCallback: this.tilingOptions.iconScaleCallback ?? undefined,
-    });
+    const renderer = new MarkerTileRenderer(tiledStates, 256, this.tilingOptions.iconScaleCallback ?? undefined);
     this.tileRenderer = renderer;
     this.tileVersion++;
     server.register(this.tileRouteId, renderer);

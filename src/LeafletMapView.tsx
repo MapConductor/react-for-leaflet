@@ -6,6 +6,7 @@ import {
   MapViewScopeProvider,
   MarkerAnimationLayer,
   MapAttributionOverlay,
+  useMapUISettings,
   type InfoBubbleEntry,
 } from '@mapconductor/js-sdk-react';
 import {
@@ -330,6 +331,8 @@ export function LeafletMapView({
     state,
     state.mapDesignType.id,
   ]);
+
+  useMapUISettings(state, controller);
 
   return (
     <MapContext.Provider value={{ controller, isReady }}>

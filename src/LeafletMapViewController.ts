@@ -4,6 +4,8 @@ import {
   createGeoRectBounds,
   createMapCameraPosition,
   computeOffset,
+  MapUISettingsDiagnostics,
+  type MapUISettings,
   type CameraOptions,
   type CircleCapable,
   type CircleState,
@@ -95,6 +97,35 @@ export class LeafletMapViewController
   }
 
   getMap(): LeafletMap { return this.map; }
+
+  /**
+   * Leaflet has no rotation or tilt of its own — MapConductor fakes both with a
+   * CSS transform on the map pane, so there is no gesture to switch off. Pan and
+   * zoom are real Leaflet handlers.
+   */
+  applyUISettings(settings: MapUISettings): void {
+    const toggle = (handler: { enable(): void; disable(): void } | undefined, enabled: boolean) => {
+      if (!handler) return;
+      if (enabled) handler.enable();
+      else handler.disable();
+    };
+
+    toggle(this.map.dragging, settings.scrollGesture);
+    toggle(this.map.scrollWheelZoom, settings.zoomGesture);
+    toggle(this.map.doubleClickZoom, settings.zoomGesture);
+    toggle(this.map.touchZoom, settings.zoomGesture);
+    toggle(this.map.boxZoom, settings.zoomGesture);
+    toggle(this.map.keyboard, settings.scrollGesture || settings.zoomGesture);
+
+    MapUISettingsDiagnostics.warnIfRequested(
+      settings.rotateGesture, 'rotate', 'Leaflet',
+      'bearing is emulated with a CSS transform, so there is no rotate gesture',
+    );
+    MapUISettingsDiagnostics.warnIfRequested(
+      settings.tiltGesture, 'tilt', 'Leaflet',
+      'tilt is emulated with a CSS transform, so there is no tilt gesture',
+    );
+  }
 
   private setupEvents(): void {
     this.map.on('movestart', () => {
