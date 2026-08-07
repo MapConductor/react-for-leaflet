@@ -5,8 +5,9 @@ import {
   createMapCameraPosition,
   computeOffset,
   MapUISettingsDiagnostics,
+  isEmptyCameraRestriction,
   type MapUISettings,
-  type CameraOptions,
+  type CameraRestriction,
   type CircleCapable,
   type CircleState,
   type GeoRectBounds,
@@ -213,13 +214,13 @@ export class LeafletMapViewController
     return true;
   }
 
-  async animateCamera(position: MapCameraPosition, options?: CameraOptions): Promise<boolean> {
+  async animateCamera(position: MapCameraPosition, durationMillis: number): Promise<boolean> {
     this.logicalTilt = position.tilt;
     this.logicalPosition = position.position;
     this.logicalZoom = position.zoom;
     this.logicalBearing = position.bearing;
     const camera = toLeafletCamera(position);
-    const durationSeconds = (options?.duration ?? 500) / 1000;
+    const durationSeconds = (durationMillis ?? 500) / 1000;
     this.map.flyTo(
       [camera.position.latitude, camera.position.longitude],
       camera.zoom,
@@ -228,17 +229,17 @@ export class LeafletMapViewController
     return true;
   }
 
-  async fitBounds(bounds: GeoRectBounds, options?: CameraOptions): Promise<boolean> {
+  async fitBounds(bounds: GeoRectBounds, padding: number): Promise<boolean> {
     if (!bounds.southWest || !bounds.northEast) return false;
-    const padding = normalizePadding(options?.padding ?? options?.paddings);
+    const paddings = normalizePadding(padding);
     this.map.fitBounds([
       [bounds.southWest.latitude, bounds.southWest.longitude],
       [bounds.northEast.latitude, bounds.northEast.longitude],
     ], {
-      animate: (options?.duration ?? 0) > 0,
-      duration: (options?.duration ?? 0) / 1000,
-      paddingTopLeft: padding ? [padding.left, padding.top] : undefined,
-      paddingBottomRight: padding ? [padding.right, padding.bottom] : undefined,
+      // android-sdk の fitBounds(bounds, padding) と同じくアニメーションはしない。
+      animate: false,
+      paddingTopLeft: paddings ? [paddings.left, paddings.top] : undefined,
+      paddingBottomRight: paddings ? [paddings.right, paddings.bottom] : undefined,
     });
     return true;
   }
@@ -261,9 +262,6 @@ export class LeafletMapViewController
     });
   }
 
-  getBounds(): GeoRectBounds | null {
-    return this.getVisibleRegion().bounds;
-  }
 
   private getVisibleRegion(): VisibleRegion {
     const size = this.map.getSize();
@@ -341,7 +339,37 @@ export class LeafletMapViewController
     ]);
   }
 
+  /**
+   * Leaflet はネイティブの範囲制限 API を持つので直接適用する。
+   *
+   * Leaflet の `maxBounds` は単体ではパン中心しかクランプせず、ズームアウトで矩形外まで
+   * 見えてしまう（LeafletProvider の生成時コメント参照）。生成時と同じく
+   * `maxBoundsViscosity` はプロバイダ側で設定済みなので、ここでは矩形とズーム上下限のみ扱う。
+   */
+  override setCameraRestriction(restriction: CameraRestriction | null): void {
+    // super は呼ばない。基底クラスに保持させるとカメラ停止時のクランプ補正まで走ってしまう。
+    // ネイティブ API 側で既に制限されているので二重適用になる（android-sdk と同じ振り分け）。
+    const effective = isEmptyCameraRestriction(restriction) ? null : restriction;
+
+    const sw = effective?.bounds?.southWest ?? null;
+    const ne = effective?.bounds?.northEast ?? null;
+    if (sw != null && ne != null) {
+      this.map.setMaxBounds([
+        [sw.latitude, sw.longitude],
+        [ne.latitude, ne.longitude],
+      ]);
+    } else {
+      // Leaflet は解除に undefined を渡す（型定義上は LatLngBoundsExpression 必須）。
+      (this.map as unknown as { setMaxBounds(b: undefined): void }).setMaxBounds(undefined);
+    }
+
+    // Leaflet のズームは統一ズーム（Google 準拠）と同一体系なので変換不要。
+    this.map.setMinZoom(effective?.minZoom ?? 0);
+    this.map.setMaxZoom(effective?.maxZoom ?? Infinity);
+  }
+
   destroy(): void {
+    super.destroy();
     if (this.destroyed) return;
     this.destroyed = true;
     this.map.off();
@@ -400,7 +428,7 @@ function toLeafletCamera(position: MapCameraPosition): MapCameraPosition {
   });
 }
 
-function normalizePadding(value: CameraOptions['padding'] | CameraOptions['paddings']) {
+function normalizePadding(value: number | undefined) {
   if (typeof value === 'number') {
     return { top: value, left: value, bottom: value, right: value };
   }

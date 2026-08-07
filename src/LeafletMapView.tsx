@@ -3,12 +3,17 @@ import {
   InfoBubbleOverlay,
   MapContext,
   MapViewScope,
+  MapServiceRegistryProvider,
   MapViewScopeProvider,
   MarkerAnimationLayer,
   MapAttributionOverlay,
-  useMapUISettings,
   type InfoBubbleEntry,
 } from '@mapconductor/js-sdk-react';
+import {
+  useCameraRestriction,
+  useMapUISettings,
+  useMarkerRenderingSupport,
+} from '@mapconductor/js-sdk-react/internal';
 import {
   MarkerTilingOptions,
   createDefaultIcon,
@@ -136,6 +141,7 @@ export function LeafletMapView({
   maxZoom,
   minZoom,
   restrictBounds,
+  cameraRestriction,
   className,
   containerStyle,
   options,
@@ -149,6 +155,9 @@ export function LeafletMapView({
   const [scope] = useState(() => new MapViewScope());
   const [controller, setController] = useState<LeafletMapViewController | null>(null);
   const [isReady, setIsReady] = useState(false);
+  // `onMapLoaded` と同じ瞬間を「値」として持つ。イベントを取り逃した後から
+  // マウントした子（examples の Three.js overlay 等）も読めるようにするため。
+  const [isLoaded, setIsLoaded] = useState(false);
   const typedControllerRef = useRef<LeafletMapViewController | null>(null);
   const bridgeUnsubs = useRef<(() => void)[]>([]);
   const [bubbleEntries, setBubbleEntries] = useState<InfoBubbleEntry[]>([]);
@@ -211,6 +220,7 @@ export function LeafletMapView({
     if (!containerRef.current) return;
     let cancelled = false;
     setIsReady(false);
+    setIsLoaded(false);
 
     const config: LeafletConfig = {
       container: containerRef.current,
@@ -261,7 +271,15 @@ export function LeafletMapView({
       });
       ctrl.setMapClickListener((point: GeoPoint) => onMapClickRef.current?.(point));
       ctrl.setMapLongClickListener((point: GeoPoint) => onMapLongClickRef.current?.(point));
-      ctrl.setMapInitializedListener(() => onMapLoadedRef.current?.(state));
+      ctrl.setMapInitializedListener(() => {
+          // 地図が出来た時点の実カメラ（visibleRegion 込み）を state へ流し込む。
+          // これで `mapViewState.cameraPosition` が最初から権威ある値になり、
+          // 拡張モジュールが `cameraPosition.visibleRegion.bounds` を初回から読める。
+          const initial = typedControllerRef.current?.getCameraPosition() ?? null;
+          if (initial) state.updateCameraPosition(initial);
+          setIsLoaded(true);
+          onMapLoadedRef.current?.(state);
+        });
 
       const registry = scope.buildRegistry();
       for (const overlay of registry.getAll()) {
@@ -333,15 +351,24 @@ export function LeafletMapView({
   ]);
 
   useMapUISettings(state, controller);
+  // マップ生成時 config だけでなく、prop の変化にも追随させる（android-sdk 相当）。
+  useCameraRestriction(controller, { cameraRestriction, restrictBounds, minZoom, maxZoom });
+
+
+  // マーカー描画 capability をこのマップのサービスレジストリへ登録する。
+  // marker-clustering などの拡張がここから解決する
+  // （android-sdk の *MapView.kt / ios-sdk の *MapView.swift が
+  //  MarkerRenderingSupportKey を put するのと同じ位置づけ）。
+  useMarkerRenderingSupport(state, scope, controller);
 
   return (
-    <MapContext.Provider value={{ controller, isReady }}>
+    <MapContext.Provider value={{ controller, isReady, isLoaded, state }}>
       <div ref={outerContainerRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', ...containerStyle }}>
         <div ref={containerRef} className={className} style={mapPlaneStyle} />
         {controller && <LeafletTiltMarkerCanvas controller={controller} active={isTilted} />}
         <MapAttributionOverlay
           scope={scope}
-          camera={typedControllerRef.current?.getCameraPosition() ?? state.cameraPosition}
+          camera={state.cameraPosition}
           designAttributionRules={state.mapDesignType.attributionRules}
         />
         {animationEntries.length > 0 && typedControllerRef.current && (
@@ -375,7 +402,9 @@ export function LeafletMapView({
           </div>
         )}
       </div>
-      <MapViewScopeProvider scope={scope}>{children}</MapViewScopeProvider>
+      <MapServiceRegistryProvider registry={state.serviceRegistry}>
+        <MapViewScopeProvider scope={scope}>{children}</MapViewScopeProvider>
+      </MapServiceRegistryProvider>
     </MapContext.Provider>
   );
 }

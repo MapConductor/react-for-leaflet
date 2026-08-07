@@ -73,7 +73,8 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
       const actual = marker(this.nearestCopyLatLng(state.position), {
         icon: this.toLeafletIcon(bitmapIcon),
         draggable: state.draggable,
-        zIndexOffset: state.zIndex,
+        // Leaflet の zIndexOffset は数値必須。未指定(null)は 0（既定の重なり順）。
+        zIndexOffset: state.zIndex ?? 0,
         keyboard: false,
         bubblingMouseEvents: false,
         opacity: this.nativeVisible ? 1 : 0,
@@ -97,7 +98,7 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
       this.logicalPositions.set(actual, current.state.position);
       actual.setLatLng(this.nearestCopyLatLng(current.state.position));
       actual.setIcon(this.toLeafletIcon(bitmapIcon));
-      actual.setZIndexOffset(current.state.zIndex);
+      actual.setZIndexOffset(current.state.zIndex ?? 0);
       if (current.state.draggable) actual.dragging?.enable();
       else actual.dragging?.disable();
       return actual;

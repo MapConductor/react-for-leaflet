@@ -68,7 +68,7 @@ export class LeafletMapViewState
     if (!durationMillis) {
       void this._controller.moveCamera(next);
     } else {
-      void this._controller.animateCamera(next, { duration: durationMillis });
+      void this._controller.animateCamera(next, durationMillis);
     }
     this._cameraPosition = next;
     this._cameraPositionChangeListener?.(next);
@@ -79,7 +79,7 @@ export class LeafletMapViewState
   }
 
   override fitBounds(bounds: GeoRectBounds, padding: number = 0): void {
-    void this._controller?.fitBounds(bounds, { padding });
+    void this._controller?.fitBounds(bounds, padding);
   }
 
   setController(controller: MapViewControllerInterface | null): void {

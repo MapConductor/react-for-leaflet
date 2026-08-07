@@ -8,13 +8,16 @@ import {
   type RasterLayerChangeParams,
   type RasterLayerEntity,
   type RasterLayerState,
+  type RasterHeaderSupport,
 } from '@mapconductor/js-sdk-core';
 import {
   GridLayer,
+  TileLayer,
   tileLayer,
   type Coords,
   type DoneCallback,
   type GridLayerOptions,
+  type TileLayerOptions,
 } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
 import { ensurePane } from '../helpers';
@@ -96,6 +99,42 @@ class LocalTileLayer extends GridLayer {
   }
 }
 
+/**
+ * `extraHeaders` を載せてタイルを取りに行く TileLayer。
+ *
+ * Leaflet の既定は `<img src>` で、img にはヘッダを付けられない。ヘッダ指定があるときだけ
+ * fetch で取って blob URL に差し替える。**指定が無いときは既定の img 経路のまま**にしてある:
+ * fetch + blob はタイル 1 枚ごとに ObjectURL を作って捨てるぶん素の img より重く、
+ * 何も要求していない利用者にその負担をかける理由が無い。
+ */
+class HeaderTileLayer extends TileLayer {
+  constructor(
+    urlTemplate: string,
+    options: TileLayerOptions,
+    private readonly headers: Record<string, string>,
+  ) {
+    super(urlTemplate, options);
+  }
+
+  override createTile(coords: Coords, done: DoneCallback): HTMLImageElement {
+    const image = document.createElement('img');
+    image.alt = '';
+    void fetch(this.getTileUrl(coords), { headers: this.headers })
+      .then(async response => {
+        if (!response.ok) throw new Error(`Tile request failed: ${response.status}`);
+        const blobUrl = URL.createObjectURL(await response.blob());
+        image.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
+        image.addEventListener('error', () => URL.revokeObjectURL(blobUrl), { once: true });
+        image.src = blobUrl;
+        done(undefined, image);
+      })
+      .catch((error: unknown) => {
+        done(error instanceof Error ? error : new Error(String(error)), image);
+      });
+    return image;
+  }
+}
+
 interface TileJsonDocument {
   tiles?: string[];
   minzoom?: number;
@@ -146,13 +185,17 @@ export class LeafletRasterLayerRenderer {
             maxZoom: source.maxZoom ?? undefined,
           });
         } else {
-          layer = tileLayer(source.template, {
+          const options: TileLayerOptions = {
             ...baseOptions,
             tileSize: source.tileSize ?? 256,
             minZoom: source.minZoom ?? undefined,
             maxZoom: source.maxZoom ?? undefined,
             tms: source.scheme === TileScheme.TMS,
-          });
+          };
+          const headers = state.extraHeaders;
+          layer = headers && Object.keys(headers).length > 0
+            ? new HeaderTileLayer(source.template, options, headers)
+            : tileLayer(source.template, options);
         }
         break;
       }
@@ -180,6 +223,15 @@ export class LeafletRasterLayerRenderer {
 }
 
 export class LeafletRasterLayerController extends RasterLayerController<GridLayer> {
+  /**
+   * ヘッダ指定があるときだけ fetch でタイルを取る HeaderTileLayer に切り替える。
+   *
+   * userAgent はブラウザが上書きを許さないので、どのプロバイダでも web では効かない。
+   */
+  protected override get headerSupport(): RasterHeaderSupport {
+    return { provider: 'Leaflet', extraHeaders: true };
+  }
+
   constructor(renderer: LeafletRasterLayerRenderer) {
     super({ rasterLayerManager: new RasterLayerManager(), renderer });
   }
