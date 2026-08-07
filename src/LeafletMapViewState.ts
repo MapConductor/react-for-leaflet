@@ -105,7 +105,7 @@ export class LeafletMapViewState
 
 export function useLeafletMapViewState(
   params: LeafletMapViewStateParams = {},
-): LeafletMapViewState {
+): LeafletMapViewStateInterface {
   const [state] = useState(() => new LeafletMapViewState(params));
   return state;
 }

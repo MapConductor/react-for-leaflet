@@ -8,6 +8,7 @@ import {
   MarkerAnimationLayer,
   MapAttributionOverlay,
   type InfoBubbleEntry,
+  createMapContextValue,
 } from '@mapconductor/js-sdk-react';
 import {
   useCameraRestriction,
@@ -23,6 +24,7 @@ import {
   type MapViewBaseProps,
   type MarkerAnimationOverlayEntry,
   type OverlayCollector,
+  mapViewStateInternal,
 } from '@mapconductor/js-sdk-core';
 import type { MapOptions } from 'leaflet';
 import { LeafletProvider, type LeafletConfig } from './LeafletProvider';
@@ -241,8 +243,8 @@ export function LeafletMapView({
       // Moving the DOM node does not remove Leaflet's registered handlers.
       const zoomControl = containerRef.current?.querySelector<HTMLElement>('.leaflet-top.leaflet-left');
       if (zoomControl && outerContainerRef.current) outerContainerRef.current.appendChild(zoomControl);
-      state.setController(ctrl);
-      state.setCameraPositionChangeListener(camera => {
+      mapViewStateInternal(state).setController(ctrl);
+      mapViewStateInternal(state).setCameraPositionChangeListener(camera => {
         setVisualTilt(camera.tilt);
         setVisualBearing(camera.bearing);
         setCameraTick(tick => tick + 1);
@@ -252,20 +254,20 @@ export function LeafletMapView({
       ctrl.setCameraMoveStartListener((camera: MapCameraPosition) => {
         setVisualTilt(camera.tilt);
         setVisualBearing(camera.bearing);
-        state.updateCameraPosition(camera);
+        mapViewStateInternal(state).updateCameraPosition(camera);
         onCameraMoveStartRef.current?.(camera);
       });
       ctrl.setCameraMoveListener((camera: MapCameraPosition) => {
         setVisualTilt(camera.tilt);
         setVisualBearing(camera.bearing);
-        state.updateCameraPosition(camera);
+        mapViewStateInternal(state).updateCameraPosition(camera);
         onCameraMoveRef.current?.(camera);
         setCameraTick(tick => tick + 1);
       });
       ctrl.setCameraMoveEndListener((camera: MapCameraPosition) => {
         setVisualTilt(camera.tilt);
         setVisualBearing(camera.bearing);
-        state.updateCameraPosition(camera);
+        mapViewStateInternal(state).updateCameraPosition(camera);
         onCameraMoveEndRef.current?.(camera);
         setCameraTick(tick => tick + 1);
       });
@@ -276,7 +278,7 @@ export function LeafletMapView({
           // これで `mapViewState.cameraPosition` が最初から権威ある値になり、
           // 拡張モジュールが `cameraPosition.visibleRegion.bounds` を初回から読める。
           const initial = typedControllerRef.current?.getCameraPosition() ?? null;
-          if (initial) state.updateCameraPosition(initial);
+          if (initial) mapViewStateInternal(state).updateCameraPosition(initial);
           setIsLoaded(true);
           onMapLoadedRef.current?.(state);
         });
@@ -332,8 +334,8 @@ export function LeafletMapView({
       cancelled = true;
       const zoomControl = outerContainerRef.current?.querySelector<HTMLElement>('.leaflet-control-zoom');
       zoomControl?.remove();
-      state.setCameraPositionChangeListener(null);
-      state.setController(null);
+      mapViewStateInternal(state).setCameraPositionChangeListener(null);
+      mapViewStateInternal(state).setController(null);
       typedControllerRef.current = null;
       bridgeUnsubs.current.forEach(unsubscribe => unsubscribe());
       bridgeUnsubs.current = [];
@@ -362,7 +364,7 @@ export function LeafletMapView({
   useMarkerRenderingSupport(state, scope, controller);
 
   return (
-    <MapContext.Provider value={{ controller, isReady, isLoaded, state }}>
+    <MapContext.Provider value={createMapContextValue({ controller, isReady, isLoaded, state })}>
       <div ref={outerContainerRef} style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', ...containerStyle }}>
         <div ref={containerRef} className={className} style={mapPlaneStyle} />
         {controller && <LeafletTiltMarkerCanvas controller={controller} active={isTilted} />}
