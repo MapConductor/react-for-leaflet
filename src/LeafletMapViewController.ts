@@ -168,16 +168,16 @@ export class LeafletMapViewController
           return;
         }
       }
-      // Overlay clicks are resolved here by the shared core geometric hit-tests
-      // (with tap tolerance), exactly like every other provider. The Leaflet
-      // overlay layers are rendered non-interactive so clicks pass through to
-      // this handler instead of hitting Leaflet's thin native path/shape click.
-      // Order: polyline, polygon, circle, ground image.
+      // オーバーレイのクリックはコアの幾何ヒットテスト（タップ許容つき）で解決する。
+      // Leaflet のオーバーレイ層は non-interactive で描いてあるので、クリックは
+      // Leaflet 自身の細いパスヒットではなくここへ落ちてくる。
+      //
+      // 順序と先勝ちはコアの dispatchOverlayTap が持つ
+      // （circle → groundImage → polyline → polygon）。移行前はここで
+      // polyline → polygon → circle → groundImage の独自順だった。
       const camera = this.getCameraPosition() ?? null;
-      if (this.polylineController.handleMapClick(clicked, camera)) return;
-      if (this.polygonController.handleMapClick(clicked)) return;
-      if (this.circleController.handleMapClick(clicked)) return;
-      if (this.groundImageController.handleMapClick(clicked)) return;
+      if (camera) void this.polylineController.onCameraChanged(camera);
+      if (this.dispatchOverlayTap(clicked)) return;
       this.notifyMapClick(clicked);
     });
     this.map.on('contextmenu', (event: LeafletMouseEvent) => {
