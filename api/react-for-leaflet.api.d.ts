@@ -274,6 +274,7 @@ declare class LeafletMapViewController extends BaseMapViewController implements 
     animateCamera(position: MapCameraPosition, durationMillis: number): Promise<boolean>;
     fitBounds(bounds: GeoRectBounds, padding: number): Promise<boolean>;
     getCameraPosition(): MapCameraPosition;
+    /** レイアウト前（幅か高さが 0）は null。他プロバイダと同じ契約にそろえた。 */
     private getVisibleRegion;
     private notifyControllersCameraChanged;
     setOnMarkerClickListener(listener: OnMarkerEventHandler | null): void;

@@ -1,7 +1,7 @@
 import {
+  buildVisibleRegion,
   BaseMapViewController,
   createGeoPoint,
-  createGeoRectBounds,
   createMapCameraPosition,
   computeOffset,
   MapUISettingsDiagnostics,
@@ -269,18 +269,11 @@ export class LeafletMapViewController
     });
   }
 
-  private getVisibleRegion(): VisibleRegion {
+  /** レイアウト前（幅か高さが 0）は null。他プロバイダと同じ契約にそろえた。 */
+  private getVisibleRegion(): VisibleRegion | null {
     const size = this.map.getSize();
-    const nearLeft = this.holder.fromScreenOffsetSync({ x: 0, y: size.y });
-    const nearRight = this.holder.fromScreenOffsetSync({ x: size.x, y: size.y });
-    const farLeft = this.holder.fromScreenOffsetSync({ x: 0, y: 0 });
-    const farRight = this.holder.fromScreenOffsetSync({ x: size.x, y: 0 });
-    const bounds = createGeoRectBounds();
-    bounds.extend(nearLeft);
-    bounds.extend(nearRight);
-    bounds.extend(farLeft);
-    bounds.extend(farRight);
-    return { bounds, nearLeft, nearRight, farLeft, farRight };
+    // 4 隅の逆投影と bounds の組み立てはコアの buildVisibleRegion が持つ。
+    return buildVisibleRegion(this.holder, { width: size.x, height: size.y });
   }
 
   private async notifyControllersCameraChanged(camera: MapCameraPosition): Promise<void> {
