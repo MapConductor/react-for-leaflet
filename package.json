@@ -1,6 +1,6 @@
 {
   "name": "@mapconductor/react-for-leaflet",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Leaflet provider for MapConductor React SDK",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@mapconductor/js-sdk-core": "^0.2.0",
-    "@mapconductor/js-sdk-react": "^0.2.0",
+    "@mapconductor/js-sdk-react": "^0.2.1",
     "leaflet": "^1.9.4"
   },
   "devDependencies": {
