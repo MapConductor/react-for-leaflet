@@ -22,8 +22,7 @@ import {
   type PolygonCapable,
   type PolylineCapable,
   type RasterLayerCapable,
-  type VisibleRegion,
-} from '@mapconductor/js-sdk-core';
+  type VisibleRegion, toNativeHeading, } from '@mapconductor/js-sdk-core';
 import type { LeafletMouseEvent, Map as LeafletMap } from 'leaflet';
 import { LeafletMapViewHolder } from './LeafletMapViewHolder';
 import { fromLeafletEvent } from './helpers';
@@ -390,7 +389,7 @@ function toLeafletCamera(position: MapCameraPosition): MapCameraPosition {
   const target = computeOffset({
     origin: position.position,
     distance: distanceForward,
-    heading: position.bearing,
+    heading: toNativeHeading(position.bearing),
   });
 
   return position.copy({
