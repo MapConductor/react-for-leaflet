@@ -78,12 +78,19 @@ class LocalTileLayer extends GridLayer {
       return image;
     }
 
-    void server.handleFetch(this.local.routeId, request).then(bytes => {
-      if (!bytes) {
+    void server.handleFetchOutcome(this.local.routeId, request).then(outcome => {
+      if (outcome.kind === 'failed') {
+        // Not an empty spot: tell Leaflet the load failed so it asks again,
+        // rather than caching a transparent tile over ground that has markers.
+        done(new Error('Failed to render local tile'), image);
+        return;
+      }
+      if (outcome.kind !== 'tile') {
         image.src = EMPTY_TILE;
         done(undefined, image);
         return;
       }
+      const bytes = outcome.bytes;
       const blobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
       image.onload = () => {
         URL.revokeObjectURL(blobUrl);
