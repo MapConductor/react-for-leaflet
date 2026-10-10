@@ -53,7 +53,7 @@ interface LeafletMapViewProps extends MapViewBaseProps<LeafletMapViewStateInterf
     children?: ReactNode;
     markerTilingOptions?: MarkerTilingOptions;
 }
-declare function LeafletMapView({ state, onMapLoaded, onMapClick, onMapLongClick, onCameraMoveStart, onCameraMove, onCameraMoveEnd, maxZoom, minZoom, restrictBounds, cameraRestriction, className, containerStyle, options, onError, children, markerTilingOptions, }: LeafletMapViewProps): react.JSX.Element;
+declare function LeafletMapView({ state, mapStyle, onStyleDiagnostics, onMapLoaded, onMapClick, onMapLongClick, onCameraMoveStart, onCameraMove, onCameraMoveEnd, maxZoom, minZoom, restrictBounds, cameraRestriction, className, containerStyle, options, onError, children, markerTilingOptions, }: LeafletMapViewProps): react.JSX.Element;
 
 declare class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Map> {
     readonly mapView: HTMLElement;
