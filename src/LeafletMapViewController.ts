@@ -23,7 +23,8 @@ import {
   type PolylineCapable,
   type RasterLayerCapable,
   type VisibleRegion, toNativeHeading, } from '@mapconductor/js-sdk-core';
-import type { LeafletMouseEvent, Map as LeafletMap } from 'leaflet';
+import { tileLayer, type LeafletMouseEvent, type Map as LeafletMap, type TileLayer } from 'leaflet';
+import type { LeafletMapDesignType } from './LeafletDesign';
 import { LeafletMapViewHolder } from './LeafletMapViewHolder';
 import { fromLeafletEvent } from './helpers';
 import { LeafletMarkerController } from './marker/LeafletMarkerController';
@@ -46,6 +47,8 @@ export class LeafletMapViewController
     GroundImageCapable,
     RasterLayerCapable {
   private readonly map: LeafletMap;
+  /** The basemap tile layer, or null for `LeafletDesign.None`. */
+  private baseLayer: TileLayer | null;
   private destroyed = false;
   private logicalTilt: number;
   private logicalPosition = createGeoPoint({ latitude: 0, longitude: 0 });
@@ -62,8 +65,10 @@ export class LeafletMapViewController
     private readonly rasterLayerController: LeafletRasterLayerController,
     initialTilt = 0,
     initialBearing = 0,
+    baseLayer: TileLayer | null = null,
   ) {
     super();
+    this.baseLayer = baseLayer;
 
     // Capable ファサードの既定実装がここから kind で引く。
 
@@ -104,6 +109,16 @@ export class LeafletMapViewController
   }
 
   getMap(): LeafletMap { return this.map; }
+
+  /**
+   * Swaps the basemap tile layer in place. Overlays live in panes of their
+   * own (see the raster renderer), so the new layer slots in underneath
+   * them. Called by the view state's `mapDesignType` setter.
+   */
+  setMapDesignType(design: LeafletMapDesignType): void {
+    this.baseLayer?.remove();
+    this.baseLayer = design.tileUrl ? tileLayer(design.tileUrl, design.tileOptions).addTo(this.map) : null;
+  }
 
   /**
    * Leaflet has no rotation or tilt of its own — MapConductor fakes both with a

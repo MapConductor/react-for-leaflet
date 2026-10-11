@@ -1,5 +1,5 @@
 import { MapDesignTypeInterface, AttributionRule, MapViewStateInterface, MapViewState, MapCameraPosition, MapViewControllerInterface, MapViewBaseProps, GeoRectBounds, MarkerTilingOptions, MapViewHolderBase, GeoPointInterface, Offset, GeoPoint, AbstractMarkerOverlayRenderer, AddParams, ChangeParams, MarkerEntity, AbstractMarkerController, RasterLayerState, MarkerState, CircleController, AbstractCircleOverlayRenderer, CircleState, CircleEntity, PolylineController, AbstractPolylineOverlayRenderer, PolylineState, PolylineEntity, PolygonController, AbstractPolygonOverlayRenderer, PolygonState, PolygonEntity, GroundImageController, AbstractGroundImageOverlayRenderer, GroundImageState, GroundImageEntity, RasterLayerController, RasterHeaderSupport, RasterLayerAddParams, RasterLayerChangeParams, RasterLayerEntity, BaseMapViewController, MarkerCapable, CircleCapable, PolylineCapable, PolygonCapable, GroundImageCapable, RasterLayerCapable, MapUISettings, OnMapInitializedHandler, OnMarkerEventHandler, MarkerAnimationOverlayHost, CameraRestriction, MapConfig, MapProvider } from '@mapconductor/js-sdk-core';
-import { TileLayerOptions, MapOptions, Map, Marker, Polygon, Polyline, ImageOverlay, GridLayer } from 'leaflet';
+import { TileLayerOptions, MapOptions, Map, Marker, Polygon, Polyline, ImageOverlay, GridLayer, TileLayer } from 'leaflet';
 import * as react from 'react';
 import { CSSProperties, ReactNode } from 'react';
 
@@ -249,13 +249,21 @@ declare class LeafletMapViewController extends BaseMapViewController implements 
     private readonly groundImageController;
     private readonly rasterLayerController;
     private readonly map;
+    /** The basemap tile layer, or null for `LeafletDesign.None`. */
+    private baseLayer;
     private destroyed;
     private logicalTilt;
     private logicalPosition;
     private logicalZoom;
     private logicalBearing;
-    constructor(holder: LeafletMapViewHolder, markerController: LeafletMarkerController, circleController: LeafletCircleController, polylineController: LeafletPolylineController, polygonController: LeafletPolygonController, groundImageController: LeafletGroundImageController, rasterLayerController: LeafletRasterLayerController, initialTilt?: number, initialBearing?: number);
+    constructor(holder: LeafletMapViewHolder, markerController: LeafletMarkerController, circleController: LeafletCircleController, polylineController: LeafletPolylineController, polygonController: LeafletPolygonController, groundImageController: LeafletGroundImageController, rasterLayerController: LeafletRasterLayerController, initialTilt?: number, initialBearing?: number, baseLayer?: TileLayer | null);
     getMap(): Map;
+    /**
+     * Swaps the basemap tile layer in place. Overlays live in panes of their
+     * own (see the raster renderer), so the new layer slots in underneath
+     * them. Called by the view state's `mapDesignType` setter.
+     */
+    setMapDesignType(design: LeafletMapDesignType): void;
     /**
      * Leaflet has no rotation or tilt of its own — MapConductor fakes both with a
      * CSS transform on the map pane, so there is no gesture to switch off. Pan and

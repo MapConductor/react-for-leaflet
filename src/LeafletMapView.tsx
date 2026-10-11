@@ -356,7 +356,8 @@ export function LeafletMapView({
     provider,
     scope,
     state,
-    state.mapDesignType.id,
+    // Design changes are applied live via the controller (see the state's
+    // `mapDesignType` setter), so they must not recreate the map.
   ]);
 
   useMapUISettings(state, controller);

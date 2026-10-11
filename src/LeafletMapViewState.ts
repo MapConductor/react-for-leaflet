@@ -39,6 +39,9 @@ export class LeafletMapViewState
 
   override set mapDesignType(value: LeafletMapDesignType) {
     this._mapDesignType = value;
+    // Applied live by the controller; the view does not rebuild the map.
+    const controller = this.attachedMapController as { setMapDesignType?: (design: LeafletMapDesignType) => void } | null;
+    controller?.setMapDesignType?.(value);
   }
 
   /** このプロバイダは接続時にカメラを動かさない（ビュー側が別経路で初期位置を当てる）。 */
