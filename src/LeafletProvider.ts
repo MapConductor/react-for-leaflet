@@ -81,7 +81,7 @@ export class LeafletProvider extends MapProvider {
     }
 
     const design = config.mapDesignType;
-    if (design.tileUrl) tileLayer(design.tileUrl, design.tileOptions).addTo(leafletMap);
+    const baseLayer = design.tileUrl ? tileLayer(design.tileUrl, design.tileOptions).addTo(leafletMap) : null;
 
     const holder = new LeafletMapViewHolder(container, leafletMap);
     const markerRenderer = new LeafletMarkerOverlayRenderer(holder);
@@ -102,6 +102,7 @@ export class LeafletProvider extends MapProvider {
       rasterLayerController,
       initial?.tilt ?? 0,
       initial?.bearing ?? 0,
+      baseLayer,
     );
     return this.controller;
   }
