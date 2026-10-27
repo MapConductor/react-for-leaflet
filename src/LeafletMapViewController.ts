@@ -27,7 +27,7 @@ import { tileLayer, type LeafletMouseEvent, type Map as LeafletMap, type TileLay
 import type { LeafletMapDesignType } from './LeafletDesign';
 import { LeafletMapViewHolder } from './LeafletMapViewHolder';
 import { fromLeafletEvent } from './helpers';
-import { LeafletMarkerController } from './marker/LeafletMarkerController';
+import { LeafletMarkerController, pointerTolerance } from './marker/LeafletMarkerController';
 import {
   LeafletCircleController,
   LeafletGroundImageController,
@@ -176,7 +176,7 @@ export class LeafletMapViewController
       // billboards' screen space instead of via the flattened native DOM events.
       if (!this.markerController.isNativeMarkersVisible()) {
         const outer = this.outerOffsetFromEvent(event.originalEvent);
-        const entity = outer ? this.markerController.findAtScreen(outer) : null;
+        const entity = outer ? this.markerController.findAtScreen(outer, pointerTolerance(event.originalEvent)) : null;
         if (entity?.state.clickable) {
           this.markerController.dispatchClick(entity.state);
           return;

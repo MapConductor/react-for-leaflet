@@ -2,14 +2,16 @@ import {
   AbstractMarkerController,
   LocalTileServer,
   MARKER_HIT_RADIUS_MOUSE_PX,
+  MARKER_HIT_RADIUS_TOUCH_PX,
   MarkerManager,
   MarkerTileRenderer,
   MarkerTilingOptions,
   RasterLayerSource,
-  Settings,
   createDefaultIcon,
   createRasterLayerState,
   createGeoPoint,
+  markerHitShape,
+  pickMarkerHit,
   type GeoPoint,
   type MarkerEntity,
   type MarkerState,
@@ -97,42 +99,28 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
 
   /**
    * Hit-tests non-tiled markers against an outer-container screen point (the same
-   * space the canvas billboards are drawn in). Returns the top-most marker whose
-   * upright icon rectangle contains the point, falling back to the nearest within
-   * the tap tolerance. Used for clicks while tilted, where the native marker DOM
-   * events are unreliable. Mirrors HERE's `find`.
+   * space the canvas billboards are drawn in), by the core rule: a marker whose
+   * drawn pin or label contains the point, the front-most of those, else the
+   * nearest within `tolerance`. The drawn shape is `markerHitShape`, not the
+   * bitmap: a default pin is about 31 px wide in a 48 px square.
+   *
+   * Used for clicks while tilted, where the native marker DOM events are
+   * unreliable, and for a click on a marker's element that missed its pin.
    */
-  findAtScreen(touch: Offset): MarkerEntity<LeafletMarker> | null {
+  findAtScreen(touch: Offset, tolerance: number = MARKER_HIT_RADIUS_MOUSE_PX): MarkerEntity<LeafletMarker> | null {
     const holder = this.renderer.holder;
-    const tolerance = Settings.Default.tapTolerance;
-    let bestOnIcon: MarkerEntity<LeafletMarker> | null = null;
-    let bestOnIconY = -Infinity;
-    let bestNear: MarkerEntity<LeafletMarker> | null = null;
-    let bestNearDistSq = Infinity;
-    for (const entity of this.markerManager.allEntities()) {
-      if (entity.marker === null) continue; // tiled markers are hit-tested via findTiled
-      const markerScreen = holder.toOuterScreenOffset(entity.state.position);
-      const icon = (entity.state.icon ?? createDefaultIcon()).toBitmapIcon();
-      const dx = touch.x - markerScreen.x;
-      const dy = touch.y - markerScreen.y;
-      const left = -icon.anchor.x * icon.size.width;
-      const right = (1 - icon.anchor.x) * icon.size.width;
-      const top = -icon.anchor.y * icon.size.height;
-      const bottom = (1 - icon.anchor.y) * icon.size.height;
-      if (dx >= left && dx <= right && dy >= top && dy <= bottom) {
-        if (markerScreen.y > bestOnIconY) {
-          bestOnIconY = markerScreen.y;
-          bestOnIcon = entity;
-        }
-      } else if (dx >= left - tolerance && dx <= right + tolerance && dy >= top - tolerance && dy <= bottom + tolerance) {
-        const distSq = dx * dx + dy * dy;
-        if (distSq < bestNearDistSq) {
-          bestNearDistSq = distSq;
-          bestNear = entity;
-        }
-      }
-    }
-    return bestOnIcon ?? bestNear;
+    const candidates = this.markerManager
+      .allEntities()
+      .filter(entity => entity.marker !== null); // tiled markers are hit-tested via findTiled
+    const hit = pickMarkerHit(touch, candidates, entity => this.hitRectOf(entity, holder), tolerance);
+    return hit?.item ?? null;
+  }
+
+  private hitRectOf(entity: MarkerEntity<LeafletMarker>, holder = this.renderer.holder) {
+    return {
+      anchorScreen: holder.toOuterScreenOffset(entity.state.position),
+      ...markerHitShape((entity.state.icon ?? createDefaultIcon()).toBitmapIcon()),
+    };
   }
 
   override async clear(): Promise<void> {
@@ -175,6 +163,21 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
       // original DOM event as well so pointer/touch compatibility paths cannot
       // select the marker and immediately clear it again.
       DomEvent.stopPropagation(event.originalEvent);
+      // The element is the whole bitmap; a default pin covers about two thirds
+      // of it. A click on the transparent rest is not this marker's: it goes to
+      // whichever marker is drawn there (or near enough for a finger), else to
+      // the map, as if the element had not been there.
+      const touch = this.outerOffset(event.originalEvent);
+      const entity = this.markerManager.getEntity(id);
+      if (touch && entity && !pickMarkerHit(touch, [entity], e => this.hitRectOf(e), 0)) {
+        const other = this.findAtScreen(touch, pointerTolerance(event.originalEvent));
+        if (other) {
+          if (other.state.clickable) this.dispatchClick(other.state);
+        } else {
+          this.renderer.holder.map.fire('click', event);
+        }
+        return;
+      }
       const state = currentState();
       if (state?.clickable) this.dispatchClick(state);
     });
@@ -254,10 +257,25 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
     this.tileRouteId = null;
     await this.onRasterLayerUpdate?.(null);
   }
+
+  /** A DOM event's pointer in the outer container's pixel space (see `findAtScreen`). */
+  private outerOffset(originalEvent: Event | undefined): Offset | null {
+    const source = originalEvent as MouseEvent | undefined;
+    const outer = this.renderer.holder.mapView.parentElement;
+    if (!source || typeof source.clientX !== 'number' || !outer) return null;
+    const rect = outer.getBoundingClientRect();
+    return { x: source.clientX - rect.left, y: source.clientY - rect.top };
+  }
 }
 
 function generateId(): string {
   return typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID().slice(0, 8)
     : Math.random().toString(36).slice(2, 10);
+}
+
+/** A finger covers an area; a mouse points at a pixel. */
+export function pointerTolerance(originalEvent: Event | undefined): number {
+  const pointerType = (originalEvent as PointerEvent | undefined)?.pointerType;
+  return pointerType === 'touch' ? MARKER_HIT_RADIUS_TOUCH_PX : MARKER_HIT_RADIUS_MOUSE_PX;
 }
