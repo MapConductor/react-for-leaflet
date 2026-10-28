@@ -148,12 +148,16 @@ declare class LeafletMarkerController extends AbstractMarkerController<Marker> {
     getNonTiledMarkerStates(): MarkerState[];
     /**
      * Hit-tests non-tiled markers against an outer-container screen point (the same
-     * space the canvas billboards are drawn in). Returns the top-most marker whose
-     * upright icon rectangle contains the point, falling back to the nearest within
-     * the tap tolerance. Used for clicks while tilted, where the native marker DOM
-     * events are unreliable. Mirrors HERE's `find`.
+     * space the canvas billboards are drawn in), by the core rule: a marker whose
+     * drawn pin or label contains the point, the front-most of those, else the
+     * nearest within `tolerance`. The drawn shape is `markerHitShape`, not the
+     * bitmap: a default pin is about 31 px wide in a 48 px square.
+     *
+     * Used for clicks while tilted, where the native marker DOM events are
+     * unreliable, and for a click on a marker's element that missed its pin.
      */
-    findAtScreen(touch: Offset): MarkerEntity<Marker> | null;
+    findAtScreen(touch: Offset, tolerance?: number): MarkerEntity<Marker> | null;
+    private hitRectOf;
     clear(): Promise<void>;
     destroy(): void;
     protected shouldTile(state: MarkerState, totalCount: number): boolean;
@@ -161,6 +165,8 @@ declare class LeafletMarkerController extends AbstractMarkerController<Marker> {
     protected onMarkerAdded(entity: MarkerEntity<Marker>): void;
     private syncTiledOverlay;
     private removeTileOverlay;
+    /** A DOM event's pointer in the outer container's pixel space (see `findAtScreen`). */
+    private outerOffset;
 }
 
 declare class LeafletCircleRenderer extends AbstractCircleOverlayRenderer<LeafletMapViewHolder, Polygon> {
