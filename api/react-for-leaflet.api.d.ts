@@ -328,4 +328,5 @@ declare class LeafletProvider extends MapProvider {
     destroy(): void;
 }
 
-export { type LeafletConfig, LeafletDesign, type LeafletMapDesignType, LeafletMapView, LeafletMapViewController, LeafletMapViewHolder, type LeafletMapViewProps, LeafletMapViewState, type LeafletMapViewStateInterface, type LeafletMapViewStateParams, LeafletProvider, useLeafletMapViewState };
+export { LeafletDesign, LeafletMapView, LeafletMapViewController, LeafletMapViewHolder, LeafletMapViewState, LeafletProvider, useLeafletMapViewState };
+export type { LeafletConfig, LeafletMapDesignType, LeafletMapViewProps, LeafletMapViewStateInterface, LeafletMapViewStateParams };
