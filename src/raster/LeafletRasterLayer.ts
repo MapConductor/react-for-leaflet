@@ -21,28 +21,14 @@ import {
 } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
 import { ensurePane } from '../helpers';
+import { parseLocalTileTemplate, type LocalTileTemplate } from './localTileUrl';
 
 const EMPTY_TILE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
-
-interface LocalTileTemplate {
-  routeId: string;
-  tileSize: number;
-}
 
 function tileZoomForTileSize(zoom: number, tileSize: number): number {
   const offset = Math.log2(tileSize / 256);
   if (!Number.isFinite(offset) || !Number.isInteger(offset)) return zoom;
   return Math.max(0, zoom - offset);
-}
-
-function parseLocalTileTemplate(template: string): LocalTileTemplate | null {
-  if (template.startsWith('mc-local-tile://')) {
-    const url = new URL(template);
-    const tileSize = Number(url.pathname.split('/').filter(Boolean)[0]);
-    return Number.isFinite(tileSize) ? { routeId: url.hostname, tileSize } : null;
-  }
-  const match = template.match(/^\/?__tiles\/([^/]+)\/(\d+)\//);
-  return match ? { routeId: match[1], tileSize: Number(match[2]) } : null;
 }
 
 class LocalTileLayer extends GridLayer {
@@ -69,7 +55,9 @@ class LocalTileLayer extends GridLayer {
     }
 
     const server = LocalTileServer.startServer();
-    const request = { x, y: coords.y, z: tileZoom };
+    // A `@2x` image is still laid out at tileSize: GridLayer sizes every tile
+    // element to it.
+    const request = { x, y: coords.y, z: tileZoom, pixelRatio: this.local.pixelRatio };
     const dataUrl = server.handleFetchDataUrl(this.local.routeId, request);
     if (dataUrl) {
       image.onload = () => done(undefined, image);

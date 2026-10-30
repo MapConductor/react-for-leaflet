@@ -12,6 +12,7 @@ import {
   createGeoPoint,
   markerHitShape,
   pickMarkerHit,
+  tilePixelRatio,
   type GeoPoint,
   type MarkerEntity,
   type MarkerState,
@@ -25,6 +26,7 @@ import {
   type LeafletMouseEvent,
   type Marker as LeafletMarker,
 } from 'leaflet';
+import { localTileUrlTemplate } from '../raster/localTileUrl';
 import { LeafletMarkerOverlayRenderer } from './LeafletMarkerOverlayRenderer';
 
 export class LeafletMarkerController extends AbstractMarkerController<LeafletMarker> {
@@ -33,6 +35,8 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
   private tileRenderer: MarkerTileRenderer<MarkerState> | null = null;
   private tileRouteId: string | null = null;
   private tileVersion = 0;
+  /** Device pixels per CSS pixel the current tiles are drawn at. */
+  private tilePixelRatio = 1;
   private tileGeneration = 0;
 
   onRasterLayerUpdate: ((state: RasterLayerState | null) => Promise<void>) | null = null;
@@ -215,6 +219,9 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
 
     this.tileRouteId ??= `mc-leaflet-tile-${generateId()}`;
     const server = LocalTileServer.startServer();
+    // Tiles are laid out as 256 CSS pixels; drawing them at the display's ratio
+    // keeps pins and labels sharp instead of stretching a 1x image.
+    this.tilePixelRatio = tilePixelRatio();
     const renderer = new MarkerTileRenderer(
       tiledStates,
       256,
@@ -222,6 +229,7 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
       1.0,
       false,
       this.tilingOptions.declutterPx,
+      this.tilePixelRatio,
     );
     this.tileRenderer = renderer;
     this.tileVersion++;
@@ -236,10 +244,16 @@ export class LeafletMarkerController extends AbstractMarkerController<LeafletMar
         routeId: this.tileRouteId,
         tileSize: 256,
         cacheKey: String(this.tileVersion),
+        pixelRatio: this.tilePixelRatio,
       });
     } else {
       await renderer.preloadIcons();
-      template = `mc-local-tile://${this.tileRouteId}/256/${this.tileVersion}/{z}/{x}/{y}.png`;
+      template = localTileUrlTemplate({
+        routeId: this.tileRouteId,
+        tileSize: 256,
+        cacheKey: String(this.tileVersion),
+        pixelRatio: this.tilePixelRatio,
+      });
     }
 
     if (generation !== this.tileGeneration) return;
