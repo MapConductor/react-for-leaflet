@@ -128,6 +128,8 @@ declare class LeafletMarkerController extends AbstractMarkerController<Marker> {
     private tileRenderer;
     private tileRouteId;
     private tileVersion;
+    /** Device pixels per CSS pixel the current tiles are drawn at. */
+    private tilePixelRatio;
     private tileGeneration;
     onRasterLayerUpdate: ((state: RasterLayerState | null) => Promise<void>) | null;
     constructor(renderer: LeafletMarkerOverlayRenderer, tilingOptions?: MarkerTilingOptions);
