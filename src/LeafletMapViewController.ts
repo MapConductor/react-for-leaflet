@@ -1,3 +1,4 @@
+import { PolygonTiler, POLYGON_TILE_LAYER_ID, polygonTileRasterLayerState } from '@mapconductor/js-sdk-core';
 import {
   buildVisibleRegion,
   BaseMapViewController,
@@ -101,6 +102,13 @@ export class LeafletMapViewController
       this.map.setView([camera.position.latitude, camera.position.longitude], camera.zoom, { animate: false });
     }
     holder.setController(this);
+    // Many polygons are drawn as tiles by the tile service worker and shown
+    // as one raster layer; taps still resolve against the original shapes.
+    this.polygonController.tiler = new PolygonTiler();
+    this.polygonController.tiler.onTemplate = async (template, tileSize) => {
+      if (template) await this.rasterLayerController.upsert(polygonTileRasterLayerState(template, tileSize));
+      else await this.rasterLayerController.removeById(POLYGON_TILE_LAYER_ID);
+    };
     markerController.onRasterLayerUpdate = async state => {
       if (state) await rasterLayerController.updateInternal(state);
       else await rasterLayerController.removeInternal('mc-marker-tiles');
