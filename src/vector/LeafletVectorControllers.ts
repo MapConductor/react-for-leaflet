@@ -36,17 +36,15 @@ import {
   type Polyline as LeafletPolyline,
 } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
-import { ensurePane } from '../helpers';
+import { ensurePane, overlayPaneZIndex } from '../helpers';
 
-const VECTOR_BASE_Z_INDEX = 400;
-const GROUND_IMAGE_BASE_Z_INDEX = 300;
-
-function vectorPane(holder: LeafletMapViewHolder, kind: string, id: string, zIndex: number): string {
-  return ensurePane(
-    holder.map,
-    `mc-${kind}-${id}`,
-    VECTOR_BASE_Z_INDEX + Math.max(-100, Math.min(100, zIndex)),
-  );
+function vectorPane(
+  holder: LeafletMapViewHolder,
+  kind: 'circle' | 'polyline' | 'polygon',
+  id: string,
+  zIndex: number,
+): string {
+  return ensurePane(holder.map, `mc-${kind}-${id}`, overlayPaneZIndex(kind, zIndex));
 }
 
 export class LeafletCircleRenderer extends AbstractCircleOverlayRenderer<
@@ -257,7 +255,7 @@ export class LeafletGroundImageRenderer extends AbstractGroundImageOverlayRender
     const pane = ensurePane(
       this.holder.map,
       `mc-ground-image-${state.id}`,
-      GROUND_IMAGE_BASE_Z_INDEX,
+      overlayPaneZIndex('groundImage'),
     );
     // Non-interactive: clicks are resolved by the shared core geometric hit-test
     // (inside the image bounds) in the map click handler, like every other provider.
