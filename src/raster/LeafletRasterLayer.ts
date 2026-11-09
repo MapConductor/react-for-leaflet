@@ -9,6 +9,7 @@ import {
   type RasterLayerEntity,
   type RasterLayerState,
   type RasterHeaderSupport,
+  POLYGON_TILE_LAYER_ID,
 } from '@mapconductor/js-sdk-core';
 import {
   GridLayer,
@@ -163,8 +164,13 @@ export class LeafletRasterLayerRenderer {
       this.holder.map,
       `mc-raster-${state.id}`,
       // Marker tiles are mounted as a raster but belong with the markers (under the native
-      // marker pane, over the shapes).
-      state.id === 'mc-marker-tiles' ? overlayPaneZIndex('marker', 0) : overlayPaneZIndex('rasterLayer', state.zIndex),
+      // marker pane, over the shapes); polygon tiles with the polygons, at the bottom of their
+      // band (under the natively drawn polygons, over ground images).
+      state.id === 'mc-marker-tiles'
+        ? overlayPaneZIndex('marker', 0)
+        : state.id === POLYGON_TILE_LAYER_ID
+          ? overlayPaneZIndex('polygon', Number.NEGATIVE_INFINITY)
+          : overlayPaneZIndex('rasterLayer', state.zIndex),
       'none',
     );
     const baseOptions = { pane, opacity: state.opacity };
