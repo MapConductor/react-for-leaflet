@@ -20,7 +20,7 @@ import {
   type TileLayerOptions,
 } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
-import { ensurePane } from '../helpers';
+import { ensurePane, overlayPaneZIndex } from '../helpers';
 import { parseLocalTileTemplate, type LocalTileTemplate } from './localTileUrl';
 
 const EMPTY_TILE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
@@ -162,7 +162,9 @@ export class LeafletRasterLayerRenderer {
     const pane = ensurePane(
       this.holder.map,
       `mc-raster-${state.id}`,
-      250 + Math.max(-100, Math.min(100, state.zIndex)),
+      // Marker tiles are mounted as a raster but belong with the markers (under the native
+      // marker pane, over the shapes).
+      state.id === 'mc-marker-tiles' ? overlayPaneZIndex('marker', 0) : overlayPaneZIndex('rasterLayer', state.zIndex),
       'none',
     );
     const baseOptions = { pane, opacity: state.opacity };
