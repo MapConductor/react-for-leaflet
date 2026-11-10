@@ -13,11 +13,11 @@ import {
 import {
   useMapViewStyle,
   useCameraRestriction,
-  useMapUISettings,
+  useMapUISettings, usePolylineTilingOptions,
   useMarkerRenderingSupport,
 } from '@mapconductor/js-sdk-react/internal';
 import {
-  MarkerTilingOptions,
+  MarkerTilingOptions, PolylineTilingOptions,
   createDefaultIcon,
   type GeoPoint,
   type GeoRectBounds,
@@ -44,6 +44,12 @@ export interface LeafletMapViewProps extends MapViewBaseProps<LeafletMapViewStat
   onError?: (error: Error) => void;
   children?: ReactNode;
   markerTilingOptions?: MarkerTilingOptions;
+  /**
+   * When to draw polylines as raster tiles ({@link PolylineTilingOptions.Default} if omitted).
+   * Read when the map is created; a later value applies from the next time the polylines are
+   * handed to the map.
+   */
+  polylineTilingOptions?: PolylineTilingOptions;
 }
 
 /**
@@ -154,6 +160,7 @@ export function LeafletMapView({
   onError,
   children,
   markerTilingOptions,
+  polylineTilingOptions,
 }: LeafletMapViewProps) {
   const outerContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -240,6 +247,7 @@ export function LeafletMapView({
       minZoom,
       restrictBounds,
       markerTilingOptions,
+      polylineTilingOptions,
       options,
     };
 
@@ -362,6 +370,7 @@ export function LeafletMapView({
   ]);
 
   useMapUISettings(state, controller);
+  usePolylineTilingOptions(controller, polylineTilingOptions);
   // マップ生成時 config だけでなく、prop の変化にも追随させる（android-sdk 相当）。
   useCameraRestriction(controller, { cameraRestriction, restrictBounds, minZoom, maxZoom });
 
