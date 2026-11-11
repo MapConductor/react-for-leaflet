@@ -13,11 +13,11 @@ import {
 import {
   useMapViewStyle,
   useCameraRestriction,
-  useMapUISettings, usePolylineTilingOptions,
+  useMapUISettings, usePolylineTilingOptions, useCircleTilingOptions,
   useMarkerRenderingSupport,
 } from '@mapconductor/js-sdk-react/internal';
 import {
-  MarkerTilingOptions, PolylineTilingOptions,
+  MarkerTilingOptions, PolylineTilingOptions, CircleTilingOptions,
   createDefaultIcon,
   type GeoPoint,
   type GeoRectBounds,
@@ -50,6 +50,12 @@ export interface LeafletMapViewProps extends MapViewBaseProps<LeafletMapViewStat
    * handed to the map.
    */
   polylineTilingOptions?: PolylineTilingOptions;
+  /**
+   * When to draw circles as raster tiles ({@link CircleTilingOptions.Default} if omitted).
+   * Read when the map is created; a later value applies from the next time the circles are
+   * handed to the map.
+   */
+  circleTilingOptions?: CircleTilingOptions;
 }
 
 /**
@@ -161,6 +167,7 @@ export function LeafletMapView({
   children,
   markerTilingOptions,
   polylineTilingOptions,
+  circleTilingOptions,
 }: LeafletMapViewProps) {
   const outerContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -248,6 +255,7 @@ export function LeafletMapView({
       restrictBounds,
       markerTilingOptions,
       polylineTilingOptions,
+      circleTilingOptions,
       options,
     };
 
@@ -371,6 +379,7 @@ export function LeafletMapView({
 
   useMapUISettings(state, controller);
   usePolylineTilingOptions(controller, polylineTilingOptions);
+  useCircleTilingOptions(controller, circleTilingOptions);
   // マップ生成時 config だけでなく、prop の変化にも追随させる（android-sdk 相当）。
   useCameraRestriction(controller, { cameraRestriction, restrictBounds, minZoom, maxZoom });
 
