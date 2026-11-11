@@ -68,7 +68,11 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
     this.nativeVisible = visible;
   }
 
-  /** Hidden native markers must not take pointer input: their billboard does. */
+  /**
+   * Hidden native markers must not take pointer input: their billboard does.
+   *
+   * @internal
+   */
   private applyNativeInteractivity(actual: LeafletMarker): void {
     if (this.nativeVisible) return;
     const element = actual.getElement();
