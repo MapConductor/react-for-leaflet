@@ -1,12 +1,25 @@
 import {
   AbstractMarkerOverlayRenderer,
+  markerDrawOrder,
   type AddParams,
   type ChangeParams,
   type GeoPoint,
   type MarkerEntity,
+  type MarkerState,
 } from '@mapconductor/js-sdk-core';
 import { icon, marker, type Marker as LeafletMarker } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
+
+/**
+ * Leaflet stacks a marker at `round(screen y) + zIndexOffset`, so lower on the
+ * screen (further south) is already in front. The shared draw order (zIndex,
+ * then south, then west) is scaled so that one zIndex step outweighs any screen
+ * y and the position share, keeping zIndex first. Leaflet's z-index is a CSS
+ * integer, so zIndex values beyond about +-2000 run out of range.
+ */
+function zIndexOffsetOf(state: MarkerState, position = state.position): number {
+  return Math.round(markerDrawOrder(state.zIndex, position) * 1_000_000);
+}
 
 export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
   LeafletMapViewHolder,
@@ -80,8 +93,7 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
       const actual = marker(this.nearestCopyLatLng(state.position), {
         icon: this.toLeafletIcon(bitmapIcon),
         draggable: state.draggable,
-        // Leaflet の zIndexOffset は数値必須。未指定(null)は 0（既定の重なり順）。
-        zIndexOffset: state.zIndex ?? 0,
+        zIndexOffset: zIndexOffsetOf(state),
         keyboard: false,
         bubblingMouseEvents: false,
         opacity: this.nativeVisible ? 1 : 0,
@@ -102,7 +114,7 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
       this.logicalPositions.set(actual, current.state.position);
       actual.setLatLng(this.nearestCopyLatLng(current.state.position));
       actual.setIcon(this.toLeafletIcon(bitmapIcon));
-      actual.setZIndexOffset(current.state.zIndex ?? 0);
+      actual.setZIndexOffset(zIndexOffsetOf(current.state));
       if (current.state.draggable) actual.dragging?.enable();
       else actual.dragging?.disable();
       // setIcon swaps in a new element, which would take clicks and drags
@@ -124,6 +136,7 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
   setMarkerPosition(entity: MarkerEntity<LeafletMarker>, position: GeoPoint): void {
     if (entity.marker) this.logicalPositions.set(entity.marker, position);
     entity.marker?.setLatLng(this.nearestCopyLatLng(position));
+    entity.marker?.setZIndexOffset(zIndexOffsetOf(entity.state, position));
   }
 
   override setMarkerVisible(entity: MarkerEntity<LeafletMarker>, visible: boolean): void {

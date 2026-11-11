@@ -119,11 +119,12 @@ function LeafletTiltMarkerCanvas({
         .map(marker => {
           const bitmapIcon = (marker.icon ?? createDefaultIcon()).toBitmapIcon();
           const screen = holder.toOuterScreenOffset(marker.position);
-          return { bitmapIcon, x: screen.x, y: screen.y };
+          return { bitmapIcon, x: screen.x, y: screen.y, zIndex: marker.zIndex ?? 0 };
         })
-        // Nearer markers (lower on screen) paint last so they overlap those
+        // A larger zIndex paints last (in front), as on the native markers; on a
+        // tie, nearer markers (lower on screen) paint last so they overlap those
         // behind them, matching the tilted perspective.
-        .sort((a, b) => a.y - b.y);
+        .sort((a, b) => (a.zIndex - b.zIndex) || (a.y - b.y));
 
       for (const { bitmapIcon, x, y } of items) {
         const img = imageFor(bitmapIcon.url);
