@@ -123,8 +123,10 @@ function LeafletTiltMarkerCanvas({
         })
         // A larger zIndex paints last (in front), as on the native markers; on a
         // tie, nearer markers (lower on screen) paint last so they overlap those
-        // behind them, matching the tilted perspective.
-        .sort((a, b) => (a.zIndex - b.zIndex) || (a.y - b.y));
+        // behind them, matching the tilted perspective, and on the same screen
+        // row the left one does. This is markerDrawOrder's rule with the bearing
+        // applied, read straight off the screen.
+        .sort((a, b) => (a.zIndex - b.zIndex) || (a.y - b.y) || (b.x - a.x));
 
       for (const { bitmapIcon, x, y } of items) {
         const img = imageFor(bitmapIcon.url);
