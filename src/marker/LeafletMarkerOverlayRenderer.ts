@@ -68,6 +68,13 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
     this.nativeVisible = visible;
   }
 
+  /** Hidden native markers must not take pointer input: their billboard does. */
+  private applyNativeInteractivity(actual: LeafletMarker): void {
+    if (this.nativeVisible) return;
+    const element = actual.getElement();
+    if (element) element.style.pointerEvents = 'none';
+  }
+
   async onAdd(data: AddParams[]): Promise<(LeafletMarker | null)[]> {
     return data.map(({ state, bitmapIcon }) => {
       const actual = marker(this.nearestCopyLatLng(state.position), {
@@ -83,10 +90,7 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
       actual.addTo(this.holder.map);
       // Markers created while tilted inherit the hidden, non-interactive state
       // (see LeafletMarkerController.setNativeMarkersVisible).
-      if (!this.nativeVisible) {
-        const element = actual.getElement();
-        if (element) element.style.pointerEvents = 'none';
-      }
+      this.applyNativeInteractivity(actual);
       return actual;
     });
   }
@@ -101,6 +105,9 @@ export class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer<
       actual.setZIndexOffset(current.state.zIndex ?? 0);
       if (current.state.draggable) actual.dragging?.enable();
       else actual.dragging?.disable();
+      // setIcon swaps in a new element, which would take clicks and drags
+      // again while the marker is hidden behind its billboard.
+      this.applyNativeInteractivity(actual);
       return actual;
     });
   }
