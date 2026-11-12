@@ -479,6 +479,10 @@ export class LeafletMapViewController
 
   async fitBounds(bounds: GeoRectBounds, padding: number): Promise<boolean> {
     if (!bounds.southWest || !bounds.northEast) return false;
+    // A fit frames the bounds in the whole viewport: the paddings of the last
+    // move no longer apply (MapLibre does the same), so the read-back must not
+    // shift the fitted center by them.
+    this.cameraPaddings = null;
     const paddings = normalizePadding(padding);
     this.map.fitBounds([
       [bounds.southWest.latitude, bounds.southWest.longitude],
@@ -522,7 +526,11 @@ export class LeafletMapViewController
     const paddings = position.paddings ?? this.cameraPaddings;
     this.cameraPaddings = paddings;
     if (!paddings) return position;
-    const center = paddedCameraCenter(position.position, this.paddingParams(paddings, position.zoom, position.bearing, position.tilt));
+    // toLeafletCamera snaps a non-negative tilt's zoom to an integer (and the
+    // read-back uses the map's live zoom), so measure the shift at that zoom:
+    // at 13.5 the shift would otherwise be √2 times too large on screen.
+    const zoom = position.tilt >= 0 ? snapZoomToGoogle(position.zoom) : position.zoom;
+    const center = paddedCameraCenter(position.position, this.paddingParams(paddings, zoom, position.bearing, position.tilt));
     return position.copy({ position: center });
   }
 
