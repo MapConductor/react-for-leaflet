@@ -133,8 +133,6 @@ declare class LeafletMarkerOverlayRenderer extends AbstractMarkerOverlayRenderer
      * (LeafletMarkerController.setNativeMarkersVisible), not here.
      */
     setNativeVisible(visible: boolean): void;
-    /** Hidden native markers must not take pointer input: their billboard does. */
-    private applyNativeInteractivity;
     onAdd(data: AddParams[]): Promise<(Marker | null)[]>;
     onChange(data: ChangeParams<Marker>[]): Promise<(Marker | null)[]>;
     onRemove(data: MarkerEntity<Marker>[]): Promise<void>;
