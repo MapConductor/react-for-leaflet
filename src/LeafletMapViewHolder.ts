@@ -1,11 +1,13 @@
 import {
   MapViewHolderBase,
+  ProjectedUnit,
   createGeoPoint,
+  type MapCoordinateSystem,
   type GeoPoint,
   type GeoPointInterface,
   type Offset,
 } from '@mapconductor/js-sdk-core';
-import type { Map as LeafletMap } from 'leaflet';
+import { latLng, point, type Map as LeafletMap } from 'leaflet';
 import type { LeafletMapViewController } from './LeafletMapViewController';
 
 export class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, LeafletMap> {
@@ -24,6 +26,36 @@ export class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Leaflet
 
   setController(controller: LeafletMapViewController): void {
     this.controller = controller;
+  }
+
+  /**
+   * The map's CRS (`options.crs`, EPSG:3857 unless the app gave another).
+   * Leaflet's built-in CRSs have no unit field, so it is read off the code;
+   * `CRS.Simple` and custom CRSs without a code report a null code.
+   */
+  override get coordinateSystem(): MapCoordinateSystem {
+    const code = this.map.options.crs?.code ?? null;
+    const unit =
+      code === 'EPSG:3857' || code === 'EPSG:3395' || code === 'EPSG:900913' ? ProjectedUnit.Meters
+        : code === 'EPSG:4326' ? ProjectedUnit.Degrees
+          : ProjectedUnit.Other;
+    return { code, unit };
+  }
+
+  override toProjectedPoint(position: GeoPointInterface): Offset | null {
+    const crs = this.map.options.crs;
+    if (!crs) return super.toProjectedPoint(position);
+    const projected = crs.project(latLng(position.latitude, position.longitude));
+    return Number.isFinite(projected.x) && Number.isFinite(projected.y) ? { x: projected.x, y: projected.y } : null;
+  }
+
+  override fromProjectedPoint(projected: Offset): GeoPoint | null {
+    const crs = this.map.options.crs;
+    if (!crs) return super.fromProjectedPoint(projected);
+    const geographic = crs.unproject(point(projected.x, projected.y));
+    return Number.isFinite(geographic.lat) && Number.isFinite(geographic.lng)
+      ? createGeoPoint({ latitude: geographic.lat, longitude: geographic.lng })
+      : null;
   }
 
   // 画面（外枠）上の位置。地図は 200% の平面に描いて回転・傾斜させているので、
