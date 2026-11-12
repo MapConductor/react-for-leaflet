@@ -261,31 +261,10 @@ export class LeafletMapViewController
     return Math.min(60, Math.abs(this.logicalTilt)) > 0.5 || Math.abs(this.logicalBearing) > 0.01;
   }
 
-  /**
-   * Outer-container pixels back to the map container's own pixels: the inverse
-   * of LeafletMapViewHolder.toOuterScreenOffset, read off the same computed CSS
-   * transform. The plane sits at z = 0 and has no perspective, so only the 2x2
-   * part of the matrix (plus its translation) maps the plane onto the screen.
-   *
-   * @internal
-   */
+  /** @internal */
   private outerToContainerPoint(offset: Offset): Point {
-    const inner = this.holder.mapView;
-    const outer = inner.parentElement;
-    const innerW = inner.offsetWidth;
-    const innerH = inner.offsetHeight;
-    if (!outer) return point(offset.x, offset.y);
-    const pivotX = outer.offsetWidth / 2 + innerW / 2;
-    const pivotY = outer.offsetHeight / 2 + innerH / 2;
-    const transform = getComputedStyle(inner).transform;
-    const m = new DOMMatrix(!transform || transform === 'none' ? undefined : transform);
-    const sx = offset.x - pivotX - m.m41;
-    const sy = offset.y - pivotY - m.m42;
-    const det = m.m11 * m.m22 - m.m21 * m.m12;
-    if (Math.abs(det) < 1e-9) return point(innerW / 2, innerH / 2);
-    const dx = (sx * m.m22 - sy * m.m21) / det;
-    const dy = (sy * m.m11 - sx * m.m12) / det;
-    return point(dx + innerW / 2, dy + innerH / 2);
+    const inner = this.holder.outerToInnerOffset(offset);
+    return point(inner.x, inner.y);
   }
 
   /**
@@ -522,9 +501,14 @@ export class LeafletMapViewController
 
   /** レイアウト前（幅か高さが 0）は null。他プロバイダと同じ契約にそろえた。 */
   private getVisibleRegion(): VisibleRegion | null {
+    // holder の screen offset は外枠（見えている画面）の座標。地図は 200% の
+    // 平面に描いているので、平面ではなく外枠の 4 隅を逆投影する。
+    const outer = this.holder.mapView.parentElement;
     const size = this.map.getSize();
+    const width = outer?.offsetWidth || size.x;
+    const height = outer?.offsetHeight || size.y;
     // 4 隅の逆投影と bounds の組み立てはコアの buildVisibleRegion が持つ。
-    return buildVisibleRegion(this.holder, { width: size.x, height: size.y });
+    return buildVisibleRegion(this.holder, { width, height });
   }
 
   private async notifyControllersCameraChanged(camera: MapCameraPosition): Promise<void> {
