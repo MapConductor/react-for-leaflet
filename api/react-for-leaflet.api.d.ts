@@ -1,4 +1,4 @@
-import { MapDesignTypeInterface, AttributionRule, MapViewStateInterface, MapViewState, MapCameraPosition, MapViewControllerInterface, MapViewBaseProps, GeoRectBounds, MarkerTilingOptions, PolylineTilingOptions, CircleTilingOptions, MapViewHolderBase, GeoPointInterface, Offset, GeoPoint, AbstractMarkerOverlayRenderer, AddParams, ChangeParams, MarkerEntity, AbstractMarkerController, RasterLayerState, MarkerState, CircleController, AbstractCircleOverlayRenderer, CircleState, CircleEntity, PolylineController, AbstractPolylineOverlayRenderer, PolylineState, PolylineEntity, PolygonController, AbstractPolygonOverlayRenderer, PolygonState, PolygonEntity, GroundImageController, AbstractGroundImageOverlayRenderer, GroundImageState, GroundImageEntity, RasterLayerController, RasterHeaderSupport, RasterLayerAddParams, RasterLayerChangeParams, RasterLayerEntity, BaseMapViewController, MarkerCapable, CircleCapable, PolylineCapable, PolygonCapable, GroundImageCapable, RasterLayerCapable, MapUISettings, OnMapInitializedHandler, OnMarkerEventHandler, MarkerAnimationOverlayHost, CameraRestriction, MapConfig, MapProvider } from '@mapconductor/js-sdk-core';
+import { MapDesignTypeInterface, AttributionRule, MapViewStateInterface, MapViewState, MapCameraPosition, MapViewControllerInterface, MapViewBaseProps, GeoRectBounds, MarkerTilingOptions, PolylineTilingOptions, CircleTilingOptions, MapViewHolderBase, MapCoordinateSystem, GeoPointInterface, Offset, GeoPoint, AbstractMarkerOverlayRenderer, AddParams, ChangeParams, MarkerEntity, AbstractMarkerController, RasterLayerState, MarkerState, CircleController, AbstractCircleOverlayRenderer, CircleState, CircleEntity, PolylineController, AbstractPolylineOverlayRenderer, PolylineState, PolylineEntity, PolygonController, AbstractPolygonOverlayRenderer, PolygonState, PolygonEntity, GroundImageController, AbstractGroundImageOverlayRenderer, GroundImageState, GroundImageEntity, RasterLayerController, RasterHeaderSupport, RasterLayerAddParams, RasterLayerChangeParams, RasterLayerEntity, BaseMapViewController, MarkerCapable, CircleCapable, PolylineCapable, PolygonCapable, GroundImageCapable, RasterLayerCapable, MapUISettings, OnMapInitializedHandler, OnMarkerEventHandler, MarkerAnimationOverlayHost, CameraRestriction, MapConfig, MapProvider } from '@mapconductor/js-sdk-core';
 import { TileLayerOptions, MapOptions, Map, Marker, Polygon, Polyline, ImageOverlay, GridLayer, TileLayer } from 'leaflet';
 import * as react from 'react';
 import { CSSProperties, ReactNode } from 'react';
@@ -74,6 +74,14 @@ declare class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Map> {
     constructor(mapView: HTMLElement, map: Map);
     getController(): LeafletMapViewController | null;
     setController(controller: LeafletMapViewController): void;
+    /**
+     * The map's CRS (`options.crs`, EPSG:3857 unless the app gave another).
+     * Leaflet's built-in CRSs have no unit field, so it is read off the code;
+     * `CRS.Simple` and custom CRSs without a code report a null code.
+     */
+    get coordinateSystem(): MapCoordinateSystem;
+    toProjectedPoint(position: GeoPointInterface): Offset | null;
+    fromProjectedPoint(projected: Offset): GeoPoint | null;
     toScreenOffset(position: GeoPointInterface): Offset;
     fromScreenOffsetSync(offset: Offset): GeoPoint;
     /**
