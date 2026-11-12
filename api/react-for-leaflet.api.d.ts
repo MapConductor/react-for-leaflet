@@ -284,6 +284,11 @@ declare class LeafletMapViewController extends BaseMapViewController implements 
     private logicalPosition;
     private logicalZoom;
     private logicalBearing;
+    /**
+     * 最後に動かしたときの `MapCameraPosition.paddings`。Leaflet にカメラの
+     * パディングは無いので、地図の中心をずらして再現し、読み戻しで元に戻す。
+     */
+    private cameraPaddings;
     constructor(holder: LeafletMapViewHolder, markerController: LeafletMarkerController, circleController: LeafletCircleController, polylineController: LeafletPolylineController, polygonController: LeafletPolygonController, groundImageController: LeafletGroundImageController, rasterLayerController: LeafletRasterLayerController, initialTilt?: number, initialBearing?: number, baseLayer?: TileLayer | null);
     getMap(): Map;
     /**
@@ -310,6 +315,13 @@ declare class LeafletMapViewController extends BaseMapViewController implements 
     animateCamera(position: MapCameraPosition, durationMillis: number): Promise<boolean>;
     fitBounds(bounds: GeoRectBounds, padding: number): Promise<boolean>;
     getCameraPosition(): MapCameraPosition;
+    /**
+     * パディングを除いた領域の中央に target が来るよう、地図の中心をずらしたカメラ。
+     * 傾きは CSS で平面を潰しているだけ（遠近なし）なので fov 0 で計算する。
+     */
+    private withPaddedCenter;
+    private paddedTarget;
+    private paddingParams;
     /** レイアウト前（幅か高さが 0）は null。他プロバイダと同じ契約にそろえた。 */
     private getVisibleRegion;
     private notifyControllersCameraChanged;

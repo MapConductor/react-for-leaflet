@@ -1,4 +1,4 @@
-import { PolygonTiler, POLYGON_TILE_LAYER_ID, polygonTileRasterLayerState, POLYLINE_TILE_LAYER_ID, polylineTileRasterLayerState, CIRCLE_TILE_LAYER_ID, circleTileRasterLayerState } from '@mapconductor/js-sdk-core';
+import { MapPaddings, paddedCameraCenter, paddedCameraTarget, PolygonTiler, POLYGON_TILE_LAYER_ID, polygonTileRasterLayerState, POLYLINE_TILE_LAYER_ID, polylineTileRasterLayerState, CIRCLE_TILE_LAYER_ID, circleTileRasterLayerState } from '@mapconductor/js-sdk-core';
 import {
   buildVisibleRegion,
   BaseMapViewController,
@@ -47,6 +47,12 @@ function wheelZoomDelta(event: WheelEvent): number {
   return Math.max(-1, Math.min(1, -pixels / 100));
 }
 
+/**
+ * Leaflet は地図を傾けられないので、平面を CSS で潰して tilt を見せている。
+ * 遠近は無いので上下視野角は 0。
+ */
+const LEAFLET_VERTICAL_FOV_DEGREES = 0;
+
 export class LeafletMapViewController
   extends BaseMapViewController
   implements
@@ -65,6 +71,11 @@ export class LeafletMapViewController
   private logicalPosition = createGeoPoint({ latitude: 0, longitude: 0 });
   private logicalZoom = 0;
   private logicalBearing = 0;
+  /**
+   * 最後に動かしたときの `MapCameraPosition.paddings`。Leaflet にカメラの
+   * パディングは無いので、地図の中心をずらして再現し、読み戻しで元に戻す。
+   */
+  private cameraPaddings: MapPaddings | null = null;
 
   constructor(
     readonly holder: LeafletMapViewHolder,
@@ -442,7 +453,7 @@ export class LeafletMapViewController
     this.logicalPosition = position.position;
     this.logicalZoom = position.zoom;
     this.logicalBearing = position.bearing;
-    const camera = toLeafletCamera(position);
+    const camera = toLeafletCamera(this.withPaddedCenter(position));
     this.map.setView(
       [camera.position.latitude, camera.position.longitude],
       camera.zoom,
@@ -456,7 +467,7 @@ export class LeafletMapViewController
     this.logicalPosition = position.position;
     this.logicalZoom = position.zoom;
     this.logicalBearing = position.bearing;
-    const camera = toLeafletCamera(position);
+    const camera = toLeafletCamera(this.withPaddedCenter(position));
     const durationSeconds = (durationMillis ?? 500) / 1000;
     this.map.flyTo(
       [camera.position.latitude, camera.position.longitude],
@@ -490,13 +501,47 @@ export class LeafletMapViewController
     // always be read from the map itself or it appears frozen.
     const usesNegativeTiltOffset = this.logicalTilt < 0;
     const center = this.map.getCenter();
+    const zoom = usesNegativeTiltOffset ? this.logicalZoom : this.map.getZoom();
+    const livePosition = createGeoPoint({ latitude: center.lat, longitude: center.lng });
     return createMapCameraPosition({
-      position: usesNegativeTiltOffset ? this.logicalPosition : createGeoPoint({ latitude: center.lat, longitude: center.lng }),
-      zoom: usesNegativeTiltOffset ? this.logicalZoom : this.map.getZoom(),
+      position: usesNegativeTiltOffset ? this.logicalPosition : this.paddedTarget(livePosition, zoom),
+      zoom,
       bearing: this.logicalBearing,
       tilt: this.logicalTilt,
+      paddings: this.cameraPaddings ?? MapPaddings.Zeros,
+      fov: LEAFLET_VERTICAL_FOV_DEGREES,
       visibleRegion: this.getVisibleRegion(),
     });
+  }
+
+  /**
+   * パディングを除いた領域の中央に target が来るよう、地図の中心をずらしたカメラ。
+   * 傾きは CSS で平面を潰しているだけ（遠近なし）なので fov 0 で計算する。
+   */
+  private withPaddedCenter(position: MapCameraPosition): MapCameraPosition {
+    const paddings = position.paddings ?? this.cameraPaddings;
+    this.cameraPaddings = paddings;
+    if (!paddings) return position;
+    const center = paddedCameraCenter(position.position, this.paddingParams(paddings, position.zoom, position.bearing, position.tilt));
+    return position.copy({ position: center });
+  }
+
+  private paddedTarget(center: GeoPoint, zoom: number): GeoPoint {
+    if (!this.cameraPaddings) return center;
+    return paddedCameraTarget(center, this.paddingParams(this.cameraPaddings, zoom, this.logicalBearing, this.logicalTilt));
+  }
+
+  private paddingParams(paddings: MapPaddings, zoom: number, bearing: number, tilt: number) {
+    const outer = this.holder.mapView.parentElement;
+    return {
+      zoom,
+      // 平面に掛けている傾き（LeafletMapView と同じく 60° で頭打ち）。
+      tilt: Math.min(60, Math.abs(tilt)),
+      bearing,
+      paddings,
+      fov: LEAFLET_VERTICAL_FOV_DEGREES,
+      viewport: { width: outer?.offsetWidth ?? 0, height: outer?.offsetHeight ?? 0 },
+    };
   }
 
   /** レイアウト前（幅か高さが 0）は null。他プロバイダと同じ契約にそろえた。 */
