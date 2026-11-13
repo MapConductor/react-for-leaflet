@@ -1,3 +1,4 @@
+import { MapPaddings, paddedCameraCenter, paddedCameraTarget, PolygonTiler, POLYGON_TILE_LAYER_ID, polygonTileRasterLayerState, POLYLINE_TILE_LAYER_ID, polylineTileRasterLayerState, CIRCLE_TILE_LAYER_ID, circleTileRasterLayerState } from '@mapconductor/js-sdk-core';
 import {
   buildVisibleRegion,
   BaseMapViewController,
@@ -9,6 +10,7 @@ import {
   type MapUISettings,
   type CameraRestriction,
   type CircleCapable,
+  type GeoPoint,
   type GeoRectBounds,
   type GroundImageCapable,
   type MapCameraPosition,
@@ -23,7 +25,7 @@ import {
   type PolylineCapable,
   type RasterLayerCapable,
   type VisibleRegion, toNativeHeading, } from '@mapconductor/js-sdk-core';
-import { tileLayer, type LeafletMouseEvent, type Map as LeafletMap, type TileLayer } from 'leaflet';
+import { point, tileLayer, type LatLng, type LeafletMouseEvent, type Map as LeafletMap, type Point, type TileLayer } from 'leaflet';
 import type { LeafletMapDesignType } from './LeafletDesign';
 import { LeafletMapViewHolder } from './LeafletMapViewHolder';
 import { fromLeafletEvent } from './helpers';
@@ -35,6 +37,21 @@ import {
   LeafletPolylineController,
 } from './vector/LeafletVectorControllers';
 import { LeafletRasterLayerController } from './raster/LeafletRasterLayer';
+
+/** Pointer travel before a press becomes a drag (a click below it). */
+const DRAG_SLOP_PX = 4;
+
+/** Zoom levels for one wheel event: a mouse notch is about one level. */
+function wheelZoomDelta(event: WheelEvent): number {
+  const pixels = event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY;
+  return Math.max(-1, Math.min(1, -pixels / 100));
+}
+
+/**
+ * Leaflet は地図を傾けられないので、平面を CSS で潰して tilt を見せている。
+ * 遠近は無いので上下視野角は 0。
+ */
+const LEAFLET_VERTICAL_FOV_DEGREES = 0;
 
 export class LeafletMapViewController
   extends BaseMapViewController
@@ -54,6 +71,11 @@ export class LeafletMapViewController
   private logicalPosition = createGeoPoint({ latitude: 0, longitude: 0 });
   private logicalZoom = 0;
   private logicalBearing = 0;
+  /**
+   * 最後に動かしたときの `MapCameraPosition.paddings`。Leaflet にカメラの
+   * パディングは無いので、地図の中心をずらして再現し、読み戻しで元に戻す。
+   */
+  private cameraPaddings: MapPaddings | null = null;
 
   constructor(
     readonly holder: LeafletMapViewHolder,
@@ -101,11 +123,35 @@ export class LeafletMapViewController
       this.map.setView([camera.position.latitude, camera.position.longitude], camera.zoom, { animate: false });
     }
     holder.setController(this);
+    // Many polygons are drawn as tiles by the tile service worker and shown
+    // as one raster layer; taps still resolve against the original shapes.
+    this.polygonController.tiler = new PolygonTiler();
+    this.polygonController.tiler.onTemplate = async (template, tileSize) => {
+      if (template) await this.rasterLayerController.upsert(polygonTileRasterLayerState(template, tileSize));
+      else await this.rasterLayerController.removeById(POLYGON_TILE_LAYER_ID);
+    };
+    // Many polylines are drawn as tiles too (the tiler is set by the provider, with the map's
+    // PolylineTilingOptions) and shown as one raster layer, in the polyline band.
+    if (this.polylineController.tiler) {
+      this.polylineController.tiler.onTemplate = async (template, tileSize) => {
+        if (template) await this.rasterLayerController.upsert(polylineTileRasterLayerState(template, tileSize));
+        else await this.rasterLayerController.removeById(POLYLINE_TILE_LAYER_ID);
+      };
+    }
+    // Many circles are drawn as tiles too (the tiler is set by the provider, with the map's
+    // CircleTilingOptions) and shown as one raster layer, at the bottom of the circle band.
+    if (this.circleController.tiler) {
+      this.circleController.tiler.onTemplate = async (template, tileSize) => {
+        if (template) await this.rasterLayerController.upsert(circleTileRasterLayerState(template, tileSize));
+        else await this.rasterLayerController.removeById(CIRCLE_TILE_LAYER_ID);
+      };
+    }
     markerController.onRasterLayerUpdate = async state => {
       if (state) await rasterLayerController.updateInternal(state);
       else await rasterLayerController.removeInternal('mc-marker-tiles');
     };
     this.setupEvents();
+    this.uninstallTransformedGestures = this.installTransformedGestures();
   }
 
   getMap(): LeafletMap { return this.map; }
@@ -165,7 +211,7 @@ export class LeafletMapViewController
       this.notifyCameraMoveEnd(camera);
     });
     this.map.on('click', (event: LeafletMouseEvent) => {
-      const clicked = fromLeafletEvent(event);
+      const clicked = this.eventGeoPoint(event);
       const tiled = this.markerController.findTiled(clicked, this.map.getZoom());
       if (tiled?.state.clickable) {
         this.markerController.dispatchClick(tiled.state);
@@ -195,7 +241,7 @@ export class LeafletMapViewController
       this.notifyMapClick(clicked);
     });
     this.map.on('contextmenu', (event: LeafletMouseEvent) => {
-      this.notifyMapLongClick(fromLeafletEvent(event));
+      this.notifyMapLongClick(this.eventGeoPoint(event));
     });
 
     const camera = this.getCameraPosition();
@@ -221,12 +267,193 @@ export class LeafletMapViewController
     return { x: source.clientX - rect.left, y: source.clientY - rect.top };
   }
 
+  /** @internal */
+  private isPlaneTransformed(): boolean {
+    return Math.min(60, Math.abs(this.logicalTilt)) > 0.5 || Math.abs(this.logicalBearing) > 0.01;
+  }
+
+  /** @internal */
+  private outerToContainerPoint(offset: Offset): Point {
+    const inner = this.holder.outerToInnerOffset(offset);
+    return point(inner.x, inner.y);
+  }
+
+  /**
+   * The ground point of a map event. Leaflet reads the pointer against the
+   * container's bounding box, which the plane's CSS rotation/tilt throws off,
+   * so while the plane is transformed the point is reprojected from the
+   * pointer's position in the outer container.
+   *
+   * @internal
+   */
+  private eventGeoPoint(event: LeafletMouseEvent): GeoPoint {
+    if (this.isPlaneTransformed()) {
+      const outer = this.outerOffsetFromEvent(event.originalEvent);
+      if (outer) {
+        const latLng = this.map.containerPointToLatLng(this.outerToContainerPoint(outer));
+        return createGeoPoint({ latitude: latLng.lat, longitude: latLng.lng });
+      }
+    }
+    return fromLeafletEvent(event);
+  }
+
+  /** @internal */
+  private uninstallTransformedGestures: () => void = () => {};
+
+  /**
+   * Pans, wheel-zooms and drags markers by hand while the plane is rotated or
+   * tilted.
+   *
+   * Leaflet's dragging and wheel zoom read the pointer in the plane's
+   * untransformed pixels, so on a rotated map the map slides off at the
+   * bearing's angle and zooms toward the wrong point. The native markers are
+   * hidden meanwhile (upright billboards are drawn instead), so their drag
+   * cannot start either. While the plane is transformed:
+   *
+   * - a press on a draggable marker drags it, keeping the grab offset on
+   *   screen, once the pointer has moved past `DRAG_SLOP_PX`;
+   * - any other press pans, keeping the grabbed ground point under the pointer;
+   * - the wheel zooms about the ground under the cursor.
+   *
+   * With dragging switched off, Leaflet would treat the release after a pan
+   * or marker drag as a click, so that click is swallowed. A flat, north-up
+   * map keeps Leaflet's own gestures (and its inertia). Listens in the capture
+   * phase on the plane's parent so it runs before Leaflet's own pointer
+   * handling. Returns the uninstaller.
+   *
+   * @internal
+   */
+  private installTransformedGestures(): () => void {
+    const outer = this.holder.mapView.parentElement;
+    if (!outer) return () => {};
+    let pointerId: number | null = null;
+    let down: Offset | null = null;
+    let moved = false;
+    let swallowClick = false;
+    let resumeDragging = false;
+    // Pan: the ground point grabbed. Marker drag: the marker and the pointer's
+    // offset from its anchor on screen.
+    let anchor: LatLng | null = null;
+    let marker: { state: MarkerState; grab: Offset; started: boolean } | null = null;
+    let wheelZoom = 0;
+
+    const screenOffset = (event: MouseEvent): Offset => {
+      const rect = outer.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
+    const latLngAt = (offset: Offset) => this.map.containerPointToLatLng(this.outerToContainerPoint(offset));
+
+    const end = () => {
+      if (pointerId == null) return;
+      pointerId = null;
+      down = null;
+      anchor = null;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+      if (marker?.started) this.markerController.endScreenDrag(marker.state);
+      marker = null;
+      swallowClick = moved;
+      if (resumeDragging) this.map.dragging?.enable();
+      resumeDragging = false;
+    };
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      const at = screenOffset(event);
+      if (!moved && down && Math.hypot(at.x - down.x, at.y - down.y) >= DRAG_SLOP_PX) moved = true;
+      if (marker) {
+        if (!marker.started) {
+          if (!moved) return;
+          marker.started = true;
+          this.markerController.beginScreenDrag(marker.state);
+        }
+        const latLng = latLngAt({ x: at.x - marker.grab.x, y: at.y - marker.grab.y });
+        this.markerController.moveScreenDrag(marker.state, createGeoPoint({ latitude: latLng.lat, longitude: latLng.lng }));
+        return;
+      }
+      if (!anchor) return;
+      // Both points in the container's own pixels: move the view by the gap
+      // between where the anchor is and where the pointer now is.
+      const anchorPx = this.map.latLngToContainerPoint(anchor);
+      const pointerPx = this.outerToContainerPoint(at);
+      this.map.panBy(anchorPx.subtract(pointerPx), { animate: false });
+    };
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId === pointerId) end();
+    };
+    const onDown = (event: PointerEvent) => {
+      swallowClick = false;
+      if (pointerId != null) {
+        // A second finger: leave the gesture (pinch) to Leaflet.
+        end();
+        return;
+      }
+      if (!event.isPrimary || event.button !== 0 || !this.isPlaneTransformed()) return;
+      const at = screenOffset(event);
+      const hit = this.markerController.isNativeMarkersVisible()
+        ? null
+        : this.markerController.findAtScreen(at, pointerTolerance(event));
+      if (hit?.state.draggable) {
+        const anchorScreen = this.holder.toOuterScreenOffset(hit.state.position);
+        marker = { state: hit.state, grab: { x: at.x - anchorScreen.x, y: at.y - anchorScreen.y }, started: false };
+      } else if (this.map.dragging?.enabled()) {
+        anchor = latLngAt(at);
+      } else {
+        // Dragging switched off by the app's UI settings: no panning at all.
+        return;
+      }
+      pointerId = event.pointerId;
+      down = at;
+      moved = false;
+      if (this.map.dragging?.enabled()) {
+        this.map.dragging.disable();
+        resumeDragging = true;
+      }
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onUp, true);
+    };
+    const onClick = (event: MouseEvent) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      event.stopPropagation();
+      event.preventDefault();
+    };
+
+    // Wheel zoom anchors on the pointer read the same untransformed way, so it
+    // zooms toward the wrong point; zoom about the ground under the cursor.
+    const onWheel = (event: WheelEvent) => {
+      if (!this.isPlaneTransformed() || !this.map.scrollWheelZoom?.enabled()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Leaflet snaps zoom to `zoomSnap`, so a trackpad's small steps are
+      // gathered until they add up to one.
+      wheelZoom += wheelZoomDelta(event);
+      const snap = this.map.options.zoomSnap ?? 1;
+      const step = snap > 0 ? Math.trunc(wheelZoom / snap) * snap : wheelZoom;
+      if (step === 0) return;
+      wheelZoom -= step;
+      this.map.setZoomAround(this.outerToContainerPoint(screenOffset(event)), this.map.getZoom() + step, { animate: false });
+    };
+
+    outer.addEventListener('pointerdown', onDown, true);
+    outer.addEventListener('click', onClick, true);
+    outer.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    return () => {
+      end();
+      outer.removeEventListener('pointerdown', onDown, true);
+      outer.removeEventListener('click', onClick, true);
+      outer.removeEventListener('wheel', onWheel, true);
+    };
+  }
+
+
   async moveCamera(position: MapCameraPosition): Promise<boolean> {
     this.logicalTilt = position.tilt;
     this.logicalPosition = position.position;
     this.logicalZoom = position.zoom;
     this.logicalBearing = position.bearing;
-    const camera = toLeafletCamera(position);
+    const camera = toLeafletCamera(this.withPaddedCenter(position));
     this.map.setView(
       [camera.position.latitude, camera.position.longitude],
       camera.zoom,
@@ -240,7 +467,7 @@ export class LeafletMapViewController
     this.logicalPosition = position.position;
     this.logicalZoom = position.zoom;
     this.logicalBearing = position.bearing;
-    const camera = toLeafletCamera(position);
+    const camera = toLeafletCamera(this.withPaddedCenter(position));
     const durationSeconds = (durationMillis ?? 500) / 1000;
     this.map.flyTo(
       [camera.position.latitude, camera.position.longitude],
@@ -252,6 +479,10 @@ export class LeafletMapViewController
 
   async fitBounds(bounds: GeoRectBounds, padding: number): Promise<boolean> {
     if (!bounds.southWest || !bounds.northEast) return false;
+    // A fit frames the bounds in the whole viewport: the paddings of the last
+    // move no longer apply (MapLibre does the same), so the read-back must not
+    // shift the fitted center by them.
+    this.cameraPaddings = null;
     const paddings = normalizePadding(padding);
     this.map.fitBounds([
       [bounds.southWest.latitude, bounds.southWest.longitude],
@@ -274,20 +505,63 @@ export class LeafletMapViewController
     // always be read from the map itself or it appears frozen.
     const usesNegativeTiltOffset = this.logicalTilt < 0;
     const center = this.map.getCenter();
+    const zoom = usesNegativeTiltOffset ? this.logicalZoom : this.map.getZoom();
+    const livePosition = createGeoPoint({ latitude: center.lat, longitude: center.lng });
     return createMapCameraPosition({
-      position: usesNegativeTiltOffset ? this.logicalPosition : createGeoPoint({ latitude: center.lat, longitude: center.lng }),
-      zoom: usesNegativeTiltOffset ? this.logicalZoom : this.map.getZoom(),
+      position: usesNegativeTiltOffset ? this.logicalPosition : this.paddedTarget(livePosition, zoom),
+      zoom,
       bearing: this.logicalBearing,
       tilt: this.logicalTilt,
+      paddings: this.cameraPaddings ?? MapPaddings.Zeros,
+      fov: LEAFLET_VERTICAL_FOV_DEGREES,
       visibleRegion: this.getVisibleRegion(),
     });
   }
 
+  /**
+   * パディングを除いた領域の中央に target が来るよう、地図の中心をずらしたカメラ。
+   * 傾きは CSS で平面を潰しているだけ（遠近なし）なので fov 0 で計算する。
+   */
+  private withPaddedCenter(position: MapCameraPosition): MapCameraPosition {
+    const paddings = position.paddings ?? this.cameraPaddings;
+    this.cameraPaddings = paddings;
+    if (!paddings) return position;
+    // toLeafletCamera snaps a non-negative tilt's zoom to an integer (and the
+    // read-back uses the map's live zoom), so measure the shift at that zoom:
+    // at 13.5 the shift would otherwise be √2 times too large on screen.
+    const zoom = position.tilt >= 0 ? snapZoomToGoogle(position.zoom) : position.zoom;
+    const center = paddedCameraCenter(position.position, this.paddingParams(paddings, zoom, position.bearing, position.tilt));
+    return position.copy({ position: center });
+  }
+
+  private paddedTarget(center: GeoPoint, zoom: number): GeoPoint {
+    if (!this.cameraPaddings) return center;
+    return paddedCameraTarget(center, this.paddingParams(this.cameraPaddings, zoom, this.logicalBearing, this.logicalTilt));
+  }
+
+  private paddingParams(paddings: MapPaddings, zoom: number, bearing: number, tilt: number) {
+    const outer = this.holder.mapView.parentElement;
+    return {
+      zoom,
+      // 平面に掛けている傾き（LeafletMapView と同じく 60° で頭打ち）。
+      tilt: Math.min(60, Math.abs(tilt)),
+      bearing,
+      paddings,
+      fov: LEAFLET_VERTICAL_FOV_DEGREES,
+      viewport: { width: outer?.offsetWidth ?? 0, height: outer?.offsetHeight ?? 0 },
+    };
+  }
+
   /** レイアウト前（幅か高さが 0）は null。他プロバイダと同じ契約にそろえた。 */
   private getVisibleRegion(): VisibleRegion | null {
+    // holder の screen offset は外枠（見えている画面）の座標。地図は 200% の
+    // 平面に描いているので、平面ではなく外枠の 4 隅を逆投影する。
+    const outer = this.holder.mapView.parentElement;
     const size = this.map.getSize();
+    const width = outer?.offsetWidth || size.x;
+    const height = outer?.offsetHeight || size.y;
     // 4 隅の逆投影と bounds の組み立てはコアの buildVisibleRegion が持つ。
-    return buildVisibleRegion(this.holder, { width: size.x, height: size.y });
+    return buildVisibleRegion(this.holder, { width, height });
   }
 
   private async notifyControllersCameraChanged(camera: MapCameraPosition): Promise<void> {
@@ -315,13 +589,13 @@ export class LeafletMapViewController
   getNonTiledMarkerStates(): MarkerState[] { return this.markerController.getNonTiledMarkerStates(); }
 
   async clearOverlays(): Promise<void> {
-    await Promise.all([
-      this.markerController.clear(),
-      this.circleController.clear(),
-      this.polylineController.clear(),
-      this.polygonController.clear(),
-      this.groundImageController.clear(),
-      this.rasterLayerController.clear(),
+    await this.clearOverlayControllers([
+      this.markerController,
+      this.circleController,
+      this.polylineController,
+      this.polygonController,
+      this.groundImageController,
+      this.rasterLayerController,
     ]);
   }
 
@@ -355,6 +629,7 @@ export class LeafletMapViewController
   }
 
   destroy(): void {
+    this.uninstallTransformedGestures();
     super.destroy();
     if (this.destroyed) return;
     this.destroyed = true;

@@ -1,4 +1,4 @@
-import { MapDesignTypeInterface, AttributionRule, MapViewStateInterface, MapViewState, MapCameraPosition, MapViewControllerInterface, MapViewBaseProps, GeoRectBounds, MarkerTilingOptions, MapViewHolderBase, GeoPointInterface, Offset, GeoPoint, AbstractMarkerOverlayRenderer, AddParams, ChangeParams, MarkerEntity, AbstractMarkerController, RasterLayerState, MarkerState, CircleController, AbstractCircleOverlayRenderer, CircleState, CircleEntity, PolylineController, AbstractPolylineOverlayRenderer, PolylineState, PolylineEntity, PolygonController, AbstractPolygonOverlayRenderer, PolygonState, PolygonEntity, GroundImageController, AbstractGroundImageOverlayRenderer, GroundImageState, GroundImageEntity, RasterLayerController, RasterHeaderSupport, RasterLayerAddParams, RasterLayerChangeParams, RasterLayerEntity, BaseMapViewController, MarkerCapable, CircleCapable, PolylineCapable, PolygonCapable, GroundImageCapable, RasterLayerCapable, MapUISettings, OnMapInitializedHandler, OnMarkerEventHandler, MarkerAnimationOverlayHost, CameraRestriction, MapConfig, MapProvider } from '@mapconductor/js-sdk-core';
+import { MapDesignTypeInterface, AttributionRule, MapViewStateInterface, MapViewState, MapCameraPosition, MapViewControllerInterface, MapViewBaseProps, GeoRectBounds, MarkerTilingOptions, PolylineTilingOptions, CircleTilingOptions, MapViewHolderBase, MapCoordinateSystem, GeoPointInterface, Offset, GeoPoint, AbstractMarkerOverlayRenderer, AddParams, ChangeParams, MarkerEntity, AbstractMarkerController, RasterLayerState, MarkerState, CircleController, AbstractCircleOverlayRenderer, CircleState, CircleEntity, PolylineController, AbstractPolylineOverlayRenderer, PolylineState, PolylineEntity, PolygonController, AbstractPolygonOverlayRenderer, PolygonState, PolygonEntity, GroundImageController, AbstractGroundImageOverlayRenderer, GroundImageState, GroundImageEntity, RasterLayerController, RasterHeaderSupport, RasterLayerAddParams, RasterLayerChangeParams, RasterLayerEntity, BaseMapViewController, MarkerCapable, CircleCapable, PolylineCapable, PolygonCapable, GroundImageCapable, RasterLayerCapable, MapUISettings, OnMapInitializedHandler, OnMarkerEventHandler, MarkerAnimationOverlayHost, CameraRestriction, MapConfig, MapProvider } from '@mapconductor/js-sdk-core';
 import { TileLayerOptions, MapOptions, Map, Marker, Polygon, Polyline, ImageOverlay, GridLayer, TileLayer } from 'leaflet';
 import * as react from 'react';
 import { CSSProperties, ReactNode } from 'react';
@@ -52,8 +52,20 @@ interface LeafletMapViewProps extends MapViewBaseProps<LeafletMapViewStateInterf
     onError?: (error: Error) => void;
     children?: ReactNode;
     markerTilingOptions?: MarkerTilingOptions;
+    /**
+     * When to draw polylines as raster tiles ({@link PolylineTilingOptions.Default} if omitted).
+     * Read when the map is created; a later value applies from the next time the polylines are
+     * handed to the map.
+     */
+    polylineTilingOptions?: PolylineTilingOptions;
+    /**
+     * When to draw circles as raster tiles ({@link CircleTilingOptions.Default} if omitted).
+     * Read when the map is created; a later value applies from the next time the circles are
+     * handed to the map.
+     */
+    circleTilingOptions?: CircleTilingOptions;
 }
-declare function LeafletMapView({ state, mapStyle, onStyleDiagnostics, onMapLoaded, onMapClick, onMapLongClick, onCameraMoveStart, onCameraMove, onCameraMoveEnd, maxZoom, minZoom, restrictBounds, cameraRestriction, className, containerStyle, options, onError, children, markerTilingOptions, }: LeafletMapViewProps): react.JSX.Element;
+declare function LeafletMapView({ state, mapStyle, onStyleDiagnostics, onMapLoaded, onMapClick, onMapLongClick, onCameraMoveStart, onCameraMove, onCameraMoveEnd, maxZoom, minZoom, restrictBounds, cameraRestriction, className, containerStyle, options, onError, children, markerTilingOptions, polylineTilingOptions, circleTilingOptions, }: LeafletMapViewProps): react.JSX.Element;
 
 declare class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Map> {
     readonly mapView: HTMLElement;
@@ -62,6 +74,14 @@ declare class LeafletMapViewHolder extends MapViewHolderBase<HTMLElement, Map> {
     constructor(mapView: HTMLElement, map: Map);
     getController(): LeafletMapViewController | null;
     setController(controller: LeafletMapViewController): void;
+    /**
+     * The map's CRS (`options.crs`, EPSG:3857 unless the app gave another).
+     * Leaflet's built-in CRSs have no unit field, so it is read off the code;
+     * `CRS.Simple` and custom CRSs without a code report a null code.
+     */
+    get coordinateSystem(): MapCoordinateSystem;
+    toProjectedPoint(position: GeoPointInterface): Offset | null;
+    fromProjectedPoint(projected: Offset): GeoPoint | null;
     toScreenOffset(position: GeoPointInterface): Offset;
     fromScreenOffsetSync(offset: Offset): GeoPoint;
     /**
@@ -264,6 +284,11 @@ declare class LeafletMapViewController extends BaseMapViewController implements 
     private logicalPosition;
     private logicalZoom;
     private logicalBearing;
+    /**
+     * 最後に動かしたときの `MapCameraPosition.paddings`。Leaflet にカメラの
+     * パディングは無いので、地図の中心をずらして再現し、読み戻しで元に戻す。
+     */
+    private cameraPaddings;
     constructor(holder: LeafletMapViewHolder, markerController: LeafletMarkerController, circleController: LeafletCircleController, polylineController: LeafletPolylineController, polygonController: LeafletPolygonController, groundImageController: LeafletGroundImageController, rasterLayerController: LeafletRasterLayerController, initialTilt?: number, initialBearing?: number, baseLayer?: TileLayer | null);
     getMap(): Map;
     /**
@@ -290,6 +315,13 @@ declare class LeafletMapViewController extends BaseMapViewController implements 
     animateCamera(position: MapCameraPosition, durationMillis: number): Promise<boolean>;
     fitBounds(bounds: GeoRectBounds, padding: number): Promise<boolean>;
     getCameraPosition(): MapCameraPosition;
+    /**
+     * パディングを除いた領域の中央に target が来るよう、地図の中心をずらしたカメラ。
+     * 傾きは CSS で平面を潰しているだけ（遠近なし）なので fov 0 で計算する。
+     */
+    private withPaddedCenter;
+    private paddedTarget;
+    private paddingParams;
     /** レイアウト前（幅か高さが 0）は null。他プロバイダと同じ契約にそろえた。 */
     private getVisibleRegion;
     private notifyControllersCameraChanged;
@@ -323,6 +355,16 @@ interface LeafletConfig extends MapConfig {
     /** Restricts panning/zooming so the viewport cannot leave this rectangle. */
     restrictBounds?: GeoRectBounds;
     markerTilingOptions?: MarkerTilingOptions;
+    /**
+     * When to draw polylines as raster tiles; {@link PolylineTilingOptions.Default} if omitted.
+     * The controller's `setPolylineTilingOptions` replaces it later.
+     */
+    polylineTilingOptions?: PolylineTilingOptions;
+    /**
+     * When to draw circles as raster tiles; {@link CircleTilingOptions.Default} if omitted.
+     * The controller's `setCircleTilingOptions` replaces it later.
+     */
+    circleTilingOptions?: CircleTilingOptions;
     options?: MapOptions;
 }
 declare class LeafletProvider extends MapProvider {

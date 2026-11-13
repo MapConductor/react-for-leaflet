@@ -9,6 +9,9 @@ import {
   type RasterLayerEntity,
   type RasterLayerState,
   type RasterHeaderSupport,
+  POLYGON_TILE_LAYER_ID,
+  POLYLINE_TILE_LAYER_ID,
+  CIRCLE_TILE_LAYER_ID,
 } from '@mapconductor/js-sdk-core';
 import {
   GridLayer,
@@ -20,7 +23,7 @@ import {
   type TileLayerOptions,
 } from 'leaflet';
 import { LeafletMapViewHolder } from '../LeafletMapViewHolder';
-import { ensurePane } from '../helpers';
+import { ensurePane, overlayPaneZIndex } from '../helpers';
 import { parseLocalTileTemplate, type LocalTileTemplate } from './localTileUrl';
 
 const EMPTY_TILE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
@@ -162,7 +165,18 @@ export class LeafletRasterLayerRenderer {
     const pane = ensurePane(
       this.holder.map,
       `mc-raster-${state.id}`,
-      250 + Math.max(-100, Math.min(100, state.zIndex)),
+      // Marker tiles are mounted as a raster but belong with the markers (under the native
+      // marker pane, over the shapes); polygon, circle and polyline tiles with the polygons, the circles and the
+      // polylines, at the bottom of their bands (under the natively drawn ones).
+      state.id === 'mc-marker-tiles'
+        ? overlayPaneZIndex('marker', 0)
+        : state.id === POLYGON_TILE_LAYER_ID
+          ? overlayPaneZIndex('polygon', Number.NEGATIVE_INFINITY)
+          : state.id === CIRCLE_TILE_LAYER_ID
+            ? overlayPaneZIndex('circle', Number.NEGATIVE_INFINITY)
+            : state.id === POLYLINE_TILE_LAYER_ID
+              ? overlayPaneZIndex('polyline', Number.NEGATIVE_INFINITY)
+              : overlayPaneZIndex('rasterLayer', state.zIndex),
       'none',
     );
     const baseOptions = { pane, opacity: state.opacity };
