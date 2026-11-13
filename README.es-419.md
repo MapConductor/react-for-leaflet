@@ -4,6 +4,69 @@
 
 Proveedor de Leaflet para el SDK de React de MapConductor. Renderiza un mapa de Leaflet a través de la API de cámara, marcadores y superposiciones independiente del proveedor de MapConductor, de modo que el mismo código de aplicación también puede ejecutarse en Google Maps, MapLibre, Mapbox, OpenLayers, ArcGIS, Cesium o HERE.
 
+## Demostración
+
+[![Ejemplo de mapa de tiendas con Leaflet](https://raw.githubusercontent.com/MapConductor/react-for-leaflet/main/docs/images/demo.jpg)](https://demo-react.mapconductor.com/leaflet/map/en)
+
+Ábrelo en la [demo en vivo](https://demo-react.mapconductor.com/leaflet/map/en): el mismo mapa de tiendas funciona con todos los proveedores y la página cambia entre ellos. El código, reducido a tres tiendas:
+
+```tsx
+import { useMemo, useState } from 'react';
+import {
+  createGeoPoint,
+  createMapCameraPosition,
+  createMarkerState,
+  type MarkerState,
+} from '@mapconductor/js-sdk-core';
+import { InfoBubble, Markers } from '@mapconductor/js-sdk-react';
+import { LeafletDesign, LeafletMapView, useLeafletMapViewState } from '@mapconductor/react-for-leaflet';
+import '@mapconductor/react-for-leaflet/style.css';
+
+const STORES = [
+  { id: 'waikiki', name: 'Waikiki', latitude: 21.2793, longitude: -157.8292 },
+  { id: 'kailua', name: 'Kailua', latitude: 21.3972, longitude: -157.7394 },
+  { id: 'haleiwa', name: 'Haleiwa', latitude: 21.5928, longitude: -158.1034 },
+];
+
+const INITIAL_CAMERA = createMapCameraPosition({
+  position: createGeoPoint({ latitude: 21.38, longitude: -157.93 }),
+  zoom: 10,
+});
+
+export default function App() {
+  const mapViewState = useLeafletMapViewState({
+    mapDesignType: LeafletDesign.OpenStreetMap,
+    cameraPosition: INITIAL_CAMERA,
+  });
+  const [selected, setSelected] = useState<MarkerState | null>(null);
+  const markers = useMemo(
+    () =>
+      STORES.map(store =>
+        createMarkerState({
+          id: store.id,
+          position: createGeoPoint({ latitude: store.latitude, longitude: store.longitude }),
+          extra: store,
+          onClick: marker => setSelected(marker),
+        }),
+      ),
+    [],
+  );
+
+  return (
+    <div style={{ width: '100%', height: '100vh' }}>
+      <LeafletMapView state={mapViewState} onMapClick={() => setSelected(null)}>
+        <Markers states={markers} />
+        {selected && (
+          <InfoBubble marker={selected}>
+            <strong>{(selected.extra as (typeof STORES)[number]).name}</strong>
+          </InfoBubble>
+        )}
+      </LeafletMapView>
+    </div>
+  );
+}
+```
+
 ## Instalación
 
 ```shell
@@ -18,7 +81,7 @@ npm install @mapconductor/react-for-leaflet @mapconductor/js-sdk-core @mapconduc
 
 `leaflet` viene incluido como dependencia; las teselas predeterminadas de OpenStreetMap no requieren clave de API.
 
-![](https://raw.githubusercontent.com/mapconductor/react-for-leaflet/docs/images/hello-map.jpg)
+![](https://raw.githubusercontent.com/MapConductor/react-for-leaflet/main/docs/images/hello-map.jpg)
 
 ## Tutorial Hello Map
 
